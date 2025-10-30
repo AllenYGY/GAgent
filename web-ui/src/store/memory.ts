@@ -3,12 +3,12 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type { Memory, MemoryStats } from '@/types';
 
 interface MemoryState {
-  // 数据状态
+  // Data state
   memories: Memory[];
   selectedMemory: Memory | null;
   stats: MemoryStats | null;
 
-  // 过滤器状态
+  // Filter state
   filters: {
     search_query: string;
     memory_types: string[];
@@ -16,11 +16,11 @@ interface MemoryState {
     min_similarity: number;
   };
 
-  // 加载状态
+  // Loading state
   loading: boolean;
   error: string | null;
 
-  // 操作方法
+  // Actions
   setMemories: (memories: Memory[]) => void;
   addMemory: (memory: Memory) => void;
   updateMemory: (id: string, updates: Partial<Memory>) => void;
@@ -32,13 +32,13 @@ interface MemoryState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
 
-  // 计算属性
+  // Derived values
   getFilteredMemories: () => Memory[];
 }
 
 export const useMemoryStore = create<MemoryState>()(
   subscribeWithSelector((set, get) => ({
-    // 初始状态
+    // Initial state
     memories: [],
     selectedMemory: null,
     stats: null,
@@ -51,15 +51,15 @@ export const useMemoryStore = create<MemoryState>()(
     loading: false,
     error: null,
 
-    // 设置记忆列表
+    // Set memory list
     setMemories: (memories) => set({ memories }),
 
-    // 添加记忆
+    // Add memory
     addMemory: (memory) => set((state) => ({
       memories: [memory, ...state.memories],
     })),
 
-    // 更新记忆
+    // Update memory
     updateMemory: (id, updates) => set((state) => ({
       memories: state.memories.map((m) =>
         m.id === id ? { ...m, ...updates } : m
@@ -69,24 +69,24 @@ export const useMemoryStore = create<MemoryState>()(
         : state.selectedMemory,
     })),
 
-    // 删除记忆
+    // Remove memory
     removeMemory: (id) => set((state) => ({
       memories: state.memories.filter((m) => m.id !== id),
       selectedMemory: state.selectedMemory?.id === id ? null : state.selectedMemory,
     })),
 
-    // 设置选中记忆
+    // Set selected memory
     setSelectedMemory: (memory) => set({ selectedMemory: memory }),
 
-    // 设置统计信息
+    // Set statistics
     setStats: (stats) => set({ stats }),
 
-    // 设置过滤器
+    // Set filters
     setFilters: (filters) => set((state) => ({
       filters: { ...state.filters, ...filters },
     })),
 
-    // 清空过滤器
+    // Clear filters
     clearFilters: () => set({
       filters: {
         search_query: '',
@@ -96,17 +96,17 @@ export const useMemoryStore = create<MemoryState>()(
       },
     }),
 
-    // 设置加载状态
+    // Set loading state
     setLoading: (loading) => set({ loading }),
 
-    // 设置错误
+    // Set error state
     setError: (error) => set({ error }),
 
-    // 获取过滤后的记忆
+    // Get filtered memories
     getFilteredMemories: () => {
       const { memories, filters } = get();
       return memories.filter((memory) => {
-        // 搜索过滤
+        // Filter by search query
         if (filters.search_query) {
           const query = filters.search_query.toLowerCase();
           const matchContent = memory.content.toLowerCase().includes(query);
@@ -117,17 +117,17 @@ export const useMemoryStore = create<MemoryState>()(
           }
         }
 
-        // 类型过滤
+        // Filter by memory type
         if (filters.memory_types.length > 0 && !filters.memory_types.includes(memory.memory_type)) {
           return false;
         }
 
-        // 重要性过滤
+        // Filter by importance
         if (filters.importance_levels.length > 0 && !filters.importance_levels.includes(memory.importance)) {
           return false;
         }
 
-        // 相似度过滤
+        // Filter by similarity
         if (memory.similarity !== undefined && memory.similarity < filters.min_similarity) {
           return false;
         }

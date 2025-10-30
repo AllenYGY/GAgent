@@ -26,55 +26,55 @@ const menuItems: MenuItem[] = [
   {
     key: 'dashboard',
     icon: <DashboardOutlined />,
-    label: '控制台',
+    label: 'Dashboard',
     path: '/dashboard',
   },
   {
     key: 'chat',
     icon: <MessageOutlined />,
-    label: 'AI对话',
+    label: 'AI Chat',
     path: '/chat',
   },
   {
     key: 'tasks',
     icon: <NodeIndexOutlined />,
-    label: '任务管理',
+    label: 'Task Management',
     path: '/tasks',
   },
   {
     key: 'plans',
     icon: <ProjectOutlined />,
-    label: '计划管理',
+    label: 'Plan Management',
     path: '/plans',
   },
   {
     key: 'memory',
     icon: <DatabaseOutlined />,
-    label: '记忆管理',
+    label: 'Memory Vault',
     path: '/memory',
   },
   {
     key: 'analytics',
     icon: <BarChartOutlined />,
-    label: '分析统计',
+    label: 'Analytics',
     path: '/analytics',
   },
   {
     key: 'tools',
     icon: <ToolOutlined />,
-    label: '工具箱',
+    label: 'Toolbox',
     path: '/tools',
   },
   {
     key: 'templates',
     icon: <BookOutlined />,
-    label: '模板库',
+    label: 'Templates',
     path: '/templates',
   },
   {
     key: 'system',
     icon: <SettingOutlined />,
-    label: '系统设置',
+    label: 'System Settings',
     path: '/system',
   },
 ];
@@ -83,7 +83,7 @@ const AppSider: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // 根据当前路径确定选中的菜单项
+  // Determine active menu item from the current path
   const selectedKeys = [location.pathname.slice(1) || 'dashboard'];
 
   const handleMenuClick = (item: { key: string }) => {

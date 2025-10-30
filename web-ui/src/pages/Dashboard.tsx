@@ -28,11 +28,11 @@ const Dashboard: React.FC = () => {
 
   const { data: planTasks = [] } = usePlanTasks({ planId: currentPlanId ?? undefined });
 
-  // 处理统计数据格式差异
+  // Normalize stats from different backend formats
   const processStats = (rawStats: any) => {
     if (!rawStats) return { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
     
-    // 如果是新格式 (后端API返回的格式)
+    // When backend returns the newer schema
     if (rawStats.by_status) {
       return {
         total: rawStats.total || 0,
@@ -43,7 +43,7 @@ const Dashboard: React.FC = () => {
       };
     }
     
-    // 如果是旧格式
+    // Legacy schema fallback
     return {
       total: rawStats.total || 0,
       pending: rawStats.pending || 0,
@@ -66,23 +66,23 @@ const Dashboard: React.FC = () => {
 
   return (
     <div>
-      {/* 页面标题 */}
+      {/* Page title */}
       <div className="content-header">
         <Title level={3} style={{ margin: 0 }}>
-          📊 控制台
+          📊 Dashboard
         </Title>
         <Text type="secondary">
-          AI 智能任务编排系统 - 实时监控和管理
+          AI Task Orchestration – real-time monitoring and control
         </Text>
       </div>
 
       <div className="content-body">
-        {/* 系统状态卡片 */}
+        {/* System stats cards */}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} sm={12} md={6}>
             <Card>
               <Statistic
-                title="任务总数"
+                title="Total tasks"
                 value={stats.total}
                 prefix={<DatabaseOutlined />}
                 valueStyle={{ color: '#1890ff' }}
@@ -93,7 +93,7 @@ const Dashboard: React.FC = () => {
           <Col xs={24} sm={12} md={6}>
             <Card>
               <Statistic
-                title="等待执行"
+                title="Pending"
                 value={stats.pending}
                 prefix={<ClockCircleOutlined />}
                 valueStyle={{ color: '#faad14' }}
@@ -104,7 +104,7 @@ const Dashboard: React.FC = () => {
           <Col xs={24} sm={12} md={6}>
             <Card>
               <Statistic
-                title="正在执行"
+                title="Running"
                 value={stats.running}
                 prefix={<PlayCircleOutlined />}
                 valueStyle={{ color: '#52c41a' }}
@@ -115,7 +115,7 @@ const Dashboard: React.FC = () => {
           <Col xs={24} sm={12} md={6}>
             <Card>
               <Statistic
-                title="已完成"
+                title="Completed"
                 value={stats.completed}
                 prefix={<CheckCircleOutlined />}
                 valueStyle={{ color: '#52c41a' }}
@@ -123,7 +123,7 @@ const Dashboard: React.FC = () => {
               {stats.failed > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <Text type="danger">
-                    <ExclamationCircleOutlined /> {stats.failed} 个失败
+                    <ExclamationCircleOutlined /> {stats.failed} failed
                   </Text>
                 </div>
               )}
@@ -131,16 +131,16 @@ const Dashboard: React.FC = () => {
           </Col>
         </Row>
 
-        {/* 系统监控 */}
+        {/* System health */}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} lg={12}>
-            <Card title="🔥 系统状态" size="small">
+            <Card title="🔥 System status" size="small">
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text>API 连接状态</Text>
+                    <Text>API connection</Text>
                     <Text strong style={{ color: systemStatus.api_connected ? '#52c41a' : '#ff4d4f' }}>
-                      {systemStatus.api_connected ? '已连接' : '断开'}
+                      {systemStatus.api_connected ? 'Connected' : 'Disconnected'}
                     </Text>
                   </div>
                   <Progress
@@ -153,11 +153,11 @@ const Dashboard: React.FC = () => {
 
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text>数据库状态</Text>
+                    <Text>Database</Text>
                     <Text strong style={{ 
                       color: systemStatus.database_status === 'connected' ? '#52c41a' : '#ff4d4f' 
                     }}>
-                      {systemStatus.database_status === 'connected' ? '正常' : '异常'}
+                      {systemStatus.database_status === 'connected' ? 'Healthy' : 'Unavailable'}
                     </Text>
                   </div>
                   <Progress
@@ -170,7 +170,7 @@ const Dashboard: React.FC = () => {
 
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text>系统负载</Text>
+                    <Text>CPU load</Text>
                     <Text strong>
                       {systemStatus.system_load.cpu}% CPU
                     </Text>
@@ -187,24 +187,24 @@ const Dashboard: React.FC = () => {
           </Col>
 
           <Col xs={24} lg={12}>
-            <Card title="📈 API 调用统计" size="small">
+            <Card title="📈 API throughput" size="small">
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <Statistic
-                  title="每分钟调用次数"
+                  title="Requests per minute"
                   value={systemStatus.system_load.api_calls_per_minute}
-                  suffix="次/分钟"
+                  suffix="req/min"
                   prefix={<RobotOutlined />}
                 />
                 
                 <div>
                   <Text type="secondary">
-                    💡 系统正在使用真实的 GLM API，无 Mock 模式
+                    💡 System is using the real GLM API (no mock mode).
                   </Text>
                 </div>
 
                 <div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    内存使用: {systemStatus.system_load.memory}%
+                    Memory usage: {systemStatus.system_load.memory}%
                   </Text>
                   <Progress
                     percent={systemStatus.system_load.memory}
@@ -218,34 +218,34 @@ const Dashboard: React.FC = () => {
           </Col>
         </Row>
 
-        {/* DAG 可视化 */}
+        {/* DAG visualisation */}
         <Row gutter={[16, 16]}>
           <Col span={24}>
             <Card 
-              title="🎯 任务编排图" 
+              title="🎯 Task orchestration map" 
               size="small"
               extra={
                 <Button
                   onClick={async () => {
-                    console.log('🔄 手动测试 PlanTree API...');
+                    console.log('🔄 Testing PlanTree API manually...');
                     if (!currentPlanId) {
-                      message.warning('当前尚未绑定计划，无法请求 PlanTree 数据。');
+                      message.warning('No plan is bound; cannot request PlanTree data.');
                       return;
                     }
                     try {
                       const response = await fetch(`${ENV.API_BASE_URL}/plans/${currentPlanId}/tree`);
                       if (!response.ok) {
-                        throw new Error(`PlanTree 请求失败: ${response.status}`);
+                        throw new Error(`PlanTree request failed: ${response.status}`);
                       }
                       const data = await response.json();
-                      console.log('✅ PlanTree 节点数:', Object.keys(data.nodes || {}).length);
+                      console.log('✅ PlanTree node count:', Object.keys(data.nodes || {}).length);
                     } catch (error) {
-                      console.error('❌ PlanTree API 调试失败:', error);
-                      message.error('PlanTree API 调试失败，请检查后端服务。');
+                      console.error('❌ PlanTree API debug failed:', error);
+                      message.error('PlanTree API debug failed. Check backend services.');
                     }
                   }}
                 >
-                  调试API
+                  Debug API
                 </Button>
               }
             >

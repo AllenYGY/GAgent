@@ -120,7 +120,7 @@
   padding: 0;
 }
 
-/* 滚动条美化 */
+/* Scrollbar styling */
 .plan-tree-visualization-container::-webkit-scrollbar {
   width: 6px;
   height: 6px;

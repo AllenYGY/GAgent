@@ -22,23 +22,23 @@ const AppHeader: React.FC = () => {
     <Header className="app-header">
       <div className="app-logo">
         <RobotOutlined className="logo-icon" />
-        <span>AI 智能任务编排系统</span>
+        <span>AI Task Orchestration System</span>
       </div>
       
       <div className="app-header-actions">
-        {/* 系统状态指示器 */}
+        {/* System status indicators */}
         <Space size="large">
-          <Tooltip title={`API连接: ${apiConnected ? '已连接' : '断开'}`}>
+          <Tooltip title={`API connection: ${apiConnected ? 'connected' : 'disconnected'}`}>
             <div className="system-status">
               <ApiOutlined style={{ marginRight: 4 }} />
               <div className={`status-indicator ${apiConnected ? '' : 'disconnected'}`} />
               <Text style={{ color: 'white', fontSize: 12 }}>
-                {apiConnected ? 'API已连接' : 'API断开'}
+                {apiConnected ? 'API connected' : 'API disconnected'}
               </Text>
             </div>
           </Tooltip>
 
-          <Tooltip title={`数据库: ${systemStatus.database_status}`}>
+          <Tooltip title={`Database: ${systemStatus.database_status}`}>
             <div className="system-status">
               <DatabaseOutlined style={{ marginRight: 4 }} />
               <div className={`status-indicator ${
@@ -46,20 +46,20 @@ const AppHeader: React.FC = () => {
                 systemStatus.database_status === 'error' ? 'disconnected' : 'warning'
               }`} />
               <Text style={{ color: 'white', fontSize: 12 }}>
-                数据库{systemStatus.database_status === 'connected' ? '正常' : '异常'}
+                Database {systemStatus.database_status === 'connected' ? 'healthy' : 'unhealthy'}
               </Text>
             </div>
           </Tooltip>
 
-          <Tooltip title="活跃任务">
+          <Tooltip title="Active tasks">
             <div className="system-status">
               <Text style={{ color: 'white', fontSize: 12 }}>
-                活跃任务: {systemStatus.active_tasks}
+                Active tasks: {systemStatus.active_tasks}
               </Text>
             </div>
           </Tooltip>
 
-          <Tooltip title="API调用/分钟">
+          <Tooltip title="API calls per minute">
             <div className="system-status">
               <Text style={{ color: 'white', fontSize: 12 }}>
                 API: {systemStatus.system_load.api_calls_per_minute}/min
@@ -68,9 +68,9 @@ const AppHeader: React.FC = () => {
           </Tooltip>
         </Space>
 
-        {/* 操作按钮 */}
+        {/* Action buttons */}
         <Space>
-          <Tooltip title="通知">
+          <Tooltip title="Notifications">
             <Badge count={0} size="small">
               <Button 
                 type="text" 
@@ -80,7 +80,7 @@ const AppHeader: React.FC = () => {
             </Badge>
           </Tooltip>
 
-          <Tooltip title={chatPanelVisible ? '隐藏聊天面板' : '显示聊天面板'}>
+          <Tooltip title={chatPanelVisible ? 'Hide chat panel' : 'Show chat panel'}>
             <Button 
               type="text" 
               icon={<MessageOutlined />} 
@@ -89,7 +89,7 @@ const AppHeader: React.FC = () => {
             />
           </Tooltip>
 
-          <Tooltip title="系统设置">
+          <Tooltip title="System settings">
             <Button 
               type="text" 
               icon={<SettingOutlined />} 

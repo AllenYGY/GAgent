@@ -69,7 +69,7 @@ const PlanDagVisualization: React.FC<PlanDagVisualizationProps> = ({
             x: 2,
             y: 2,
           },
-          title: `任务：${task.name}\n状态：${task.status}\n类型：${task.task_type}`,
+          title: `Task: ${task.name}\nStatus: ${task.status}\nType: ${task.task_type}`,
         };
       })
     );
@@ -157,7 +157,7 @@ const PlanDagVisualization: React.FC<PlanDagVisualizationProps> = ({
             background: 'rgba(255,255,255,0.7)',
           }}
         >
-          <Spin size="large" tip="加载DAG中" />
+          <Spin size="large" tip="Loading DAG..." />
         </div>
       )}
       <div ref={containerRef} style={{ height: '100%' }} />

@@ -44,22 +44,22 @@ const statusMeta: Record<
 > = {
   queued: {
     color: 'default',
-    label: '排队中',
+    label: 'Queued',
     icon: <PauseCircleOutlined />,
   },
   running: {
     color: 'processing',
-    label: '执行中',
+    label: 'Running',
     icon: <SyncOutlined spin />,
   },
   succeeded: {
     color: 'success',
-    label: '已完成',
+    label: 'Completed',
     icon: <CheckCircleOutlined />,
   },
   failed: {
     color: 'error',
-    label: '失败',
+    label: 'Failed',
     icon: <CloseCircleOutlined />,
   },
 };
@@ -72,19 +72,19 @@ const jobTypeMeta: Record<
   }
 > = {
   plan_decompose: {
-    label: '任务拆分日志',
+    label: 'Task decomposition log',
     color: 'blue',
   },
   plan_execute: {
-    label: '计划执行日志',
+    label: 'Plan execution log',
     color: 'green',
   },
   chat_action: {
-    label: '动作执行日志',
+    label: 'Action execution log',
     color: 'purple',
   },
   default: {
-    label: '后台任务日志',
+    label: 'Background job log',
     color: 'geekblue',
   },
 };
@@ -117,7 +117,7 @@ const parseStreamData = (raw: MessageEvent<any>): StreamMessage | null => {
     payload.type = 'event';
     return payload as StreamMessage;
   } catch (error) {
-    console.warn('无法解析 SSE 消息:', error);
+    console.warn('Unable to parse SSE message:', error);
     return null;
   }
 };
@@ -221,7 +221,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
           setMissingJob(true);
           stopPolling();
         } else {
-          console.error('轮询任务状态失败:', err);
+          console.error('Failed to poll job status:', err);
         }
       }
     }, 5000);
@@ -305,8 +305,8 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
           stopPolling();
           return;
         }
-        console.error('加载任务拆分状态失败:', err);
-        // 进入轮询兜底
+        console.error('Failed to load job status:', err);
+        // fall back to polling
       }
 
       const streamUrl = `${ENV.API_BASE_URL}/jobs/${jobId}/stream`;
@@ -372,12 +372,12 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
             closeStream();
             return;
           }
-          console.warn('SSE 链接中断，切换为轮询模式');
+          console.warn('SSE connection interrupted; switching to polling.');
           closeStream();
           startPolling();
         };
       } catch (err) {
-        console.warn('SSE 初始化失败，改用轮询:', err);
+        console.warn('Failed to initialise SSE; falling back to polling:', err);
         startPolling();
       }
     };
@@ -454,7 +454,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
     return (
       <div style={{ width: '100%' }}>
         <Divider plain style={{ margin: '12px 0' }}>
-          动作执行记录
+          Action execution log
         </Divider>
         <Space direction="vertical" size={6} style={{ width: '100%' }}>
           {actionLogs.map((entry) => {
@@ -470,7 +470,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
                     <span style={{ marginLeft: 4 }}>{statusInfo.label}</span>
                   </Tag>
                   <Text strong>
-                    步骤 {entry.sequence}: {descriptor}
+                    Step {entry.sequence}: {descriptor}
                   </Text>
                 </Space>
                 {entry.message && (
@@ -497,8 +497,8 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
       return (
         <Alert
           type="warning"
-          message="无法加载日志"
-          description="对应的后台任务已清理或不存在。"
+          message="Unable to load logs"
+          description="The background job has been cleared or no longer exists."
           showIcon
         />
       );
@@ -506,7 +506,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
     if (!logs.length) {
       return (
         <Text type="secondary" style={{ fontSize: 12 }}>
-          暂无日志输出。
+          No logs available yet.
         </Text>
       );
     }
@@ -543,16 +543,16 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
       return (
         <div style={{ marginTop: 12 }}>
           <Divider plain style={{ margin: '12px 0' }}>
-            执行结果
+            Execution summary
           </Divider>
           <Space direction="vertical" size="small" style={{ width: '100%' }}>
             <Space size="small">
               <FileTextOutlined />
-              <Text>新增子任务：{createdTasks.length}</Text>
+              <Text>New subtasks: {createdTasks.length}</Text>
             </Space>
             {stoppedReason && (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                停止原因：{stoppedReason}
+                Stop reason: {stoppedReason}
               </Text>
             )}
           </Space>
@@ -568,19 +568,19 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
       return (
         <div style={{ marginTop: 12 }}>
           <Divider plain style={{ margin: '12px 0' }}>
-            动作总结
+            Action summary
           </Divider>
           <Space direction="vertical" size="small" style={{ width: '100%' }}>
             <Space size="small">
               <FileTextOutlined />
-              <Text>总动作：{steps.length}</Text>
+              <Text>Total actions: {steps.length}</Text>
             </Space>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              成功：{succeededSteps.length}，失败：{failedSteps.length}
+              Succeeded: {succeededSteps.length}, Failed: {failedSteps.length}
             </Text>
             {firstFailure && (
               <Text type="danger" style={{ fontSize: 12 }}>
-                首个失败动作：{firstFailure?.action?.name ?? '-'} — {firstFailure?.message ?? '执行失败'}
+                First failed action: {firstFailure?.action?.name ?? '-'} — {firstFailure?.message ?? 'Execution failed'}
               </Text>
             )}
           </Space>
@@ -598,7 +598,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
       title={headerTitle}
       extra={
         <Space size="small">
-          <Tooltip title={isStreaming ? '实时同步中' : '使用轮询获取'}>
+          <Tooltip title={isStreaming ? 'Live streaming' : 'Fetching via polling'}>
             {isStreaming ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
           </Tooltip>
           <Button
@@ -607,7 +607,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
             icon={expanded ? <UpOutlined /> : <DownOutlined />}
             onClick={() => setExpanded((prev) => !prev)}
           >
-            {expanded ? '收起' : '展开'}
+            {expanded ? 'Collapse' : 'Expand'}
           </Button>
         </Space>
       }
@@ -622,27 +622,27 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Space size="small">
               <Text type="secondary" style={{ fontSize: 12 }}>
-                目标任务：
+                Target task:
               </Text>
               <Text>{targetTaskName ?? '-'}</Text>
             </Space>
             {resolvedPlanId !== null && resolvedPlanId !== undefined ? (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                计划 ID：{resolvedPlanId}
+                Plan ID: {resolvedPlanId}
               </Text>
             ) : planId !== undefined && planId !== null ? (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                计划 ID：{planId}
+                Plan ID: {planId}
               </Text>
             ) : null}
             {jobMetadata?.session_id && (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                会话 ID：{jobMetadata.session_id}
+                Session ID: {jobMetadata.session_id}
               </Text>
             )}
             {lastUpdatedText && (
               <Text type="secondary" style={{ fontSize: 12 }}>
-                最近更新：{lastUpdatedText}
+                Last update: {lastUpdatedText}
               </Text>
             )}
           </Space>
@@ -650,7 +650,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
           {error && (
             <Alert
               type="error"
-              message="后台执行失败"
+              message="Background execution failed"
               description={error}
               showIcon
             />
@@ -663,7 +663,7 @@ const JobLogPanel: React.FC<JobLogPanelProps> = ({ jobId, initialJob, targetTask
           {Object.keys(stats || {}).length > 0 && (
             <div style={{ fontSize: 12, color: '#999' }}>
               <Divider plain style={{ margin: '12px 0' }}>
-                统计信息
+                Statistics
               </Divider>
               <Paragraph
                 copyable={{

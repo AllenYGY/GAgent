@@ -4,7 +4,7 @@ import { PlanResultItem, PlanSyncEventDetail, Task } from '@/types';
 import { queryClient } from '@/queryClient';
 import { isPlanSyncEventDetail } from '@utils/planSyncEvents';
 
-// 临时类型定义，解决编译错误
+// Temporary type definition to avoid build errors
 interface TaskStats {
   total: number;
   pending: number;
@@ -28,7 +28,7 @@ interface DAGEdge {
 }
 
 interface TasksState {
-  // 任务数据
+  // Task data
   tasks: Task[];
   selectedTask: Task | null;
   selectedTaskId: number | null;
@@ -38,19 +38,19 @@ interface TasksState {
   isTaskDrawerOpen: boolean;
   taskResultCache: Record<number, PlanResultItem | null>;
   
-  // DAG可视化数据
+  // DAG visualization data
   dagNodes: DAGNode[];
   dagEdges: DAGEdge[];
   dagLayout: 'hierarchical' | 'force' | 'circular';
   
-  // 过滤和搜索
+  // Filtering and search
   filters: {
     status: string[];
     task_type: string[];
     search_query: string;
   };
   
-  // 操作方法
+  // Actions
   setTasks: (tasks: Task[]) => void;
   addTask: (task: Task) => void;
   updateTask: (id: number, updates: Partial<Task>) => void;
@@ -65,16 +65,16 @@ interface TasksState {
   setCurrentWorkflowId: (workflowId: string | null) => void;
   setTaskStats: (stats: TaskStats | null) => void;
   
-  // DAG操作
+  // DAG helpers
   setDagData: (nodes: DAGNode[], edges: DAGEdge[]) => void;
   updateNodePosition: (nodeId: string, position: { x: number; y: number }) => void;
   setDagLayout: (layout: TasksState['dagLayout']) => void;
   
-  // 过滤操作
+  // Filter helpers
   setFilters: (filters: Partial<TasksState['filters']>) => void;
   clearFilters: () => void;
   
-  // 计算属性
+  // Derived values
   getFilteredTasks: () => Task[];
   getTaskStats: () => {
     total: number;
@@ -87,7 +87,7 @@ interface TasksState {
 
 export const useTasksStore = create<TasksState>()(
   subscribeWithSelector((set, get) => ({
-    // 初始状态
+    // Initial state
     tasks: [],
     selectedTask: null,
     selectedTaskId: null,
@@ -105,7 +105,7 @@ export const useTasksStore = create<TasksState>()(
       search_query: '',
     },
 
-    // 设置任务列表
+    // Set task list
     setTasks: (tasks) => {
       set(() => {
         const { nodes, edges } = generateDagData(tasks);
@@ -126,14 +126,14 @@ export const useTasksStore = create<TasksState>()(
       });
     },
 
-    // 添加任务
+    // Add task
     addTask: (task) => set((state) => {
       const tasks = [...state.tasks, task];
       const { nodes, edges } = generateDagData(tasks);
       return { tasks, dagNodes: nodes, dagEdges: edges };
     }),
 
-    // 更新任务
+    // Update task
     updateTask: (id, updates) => set((state) => {
       const tasks = state.tasks.map((task) =>
         task.id === id ? { ...task, ...updates } : task
@@ -150,7 +150,7 @@ export const useTasksStore = create<TasksState>()(
       };
     }),
 
-    // 删除任务
+    // Remove task
     removeTask: (id) => set((state) => {
       const tasks = state.tasks.filter((task) => task.id !== id);
       const { nodes, edges } = generateDagData(tasks);
@@ -164,7 +164,7 @@ export const useTasksStore = create<TasksState>()(
       };
     }),
 
-    // 设置选中任务
+    // Set selected task
     setSelectedTask: (task) =>
       set({
         selectedTask: task,
@@ -232,32 +232,32 @@ export const useTasksStore = create<TasksState>()(
         return { taskResultCache: {} };
       }),
 
-    // 设置当前计划
+    // Set current plan
     setCurrentPlan: (planTitle) => set({ currentPlan: planTitle }),
 
     setCurrentWorkflowId: (workflowId) => set({ currentWorkflowId: workflowId }),
 
     setTaskStats: (stats) => set({ taskStats: stats }),
 
-    // 设置DAG数据
+    // Set DAG data
     setDagData: (nodes, edges) => set({ dagNodes: nodes, dagEdges: edges }),
 
-    // 更新节点位置
+    // Update node position
     updateNodePosition: (nodeId, position) => set((state) => ({
       dagNodes: state.dagNodes.map((node) =>
         node.id === nodeId ? { ...node, ...position } : node
       ),
     })),
 
-    // 设置DAG布局
+    // Set DAG layout
     setDagLayout: (layout) => set({ dagLayout: layout }),
 
-    // 设置过滤器
+    // Set filters
     setFilters: (filters) => set((state) => ({
       filters: { ...state.filters, ...filters },
     })),
 
-    // 清空过滤器
+    // Clear filters
     clearFilters: () => set({
       filters: {
         status: [],
@@ -266,21 +266,21 @@ export const useTasksStore = create<TasksState>()(
       },
     }),
 
-    // 获取过滤后的任务
+    // Get filtered tasks
     getFilteredTasks: () => {
       const { tasks, filters } = get();
       return tasks.filter((task) => {
-        // 状态过滤
+        // Filter by status
         if (filters.status.length > 0 && !filters.status.includes(task.status)) {
           return false;
         }
         
-        // 类型过滤
+        // Filter by type
         if (filters.task_type.length > 0 && !filters.task_type.includes(task.task_type)) {
           return false;
         }
         
-        // 搜索过滤
+        // Filter by search query
         if (filters.search_query) {
           const query = filters.search_query.toLowerCase();
           return task.name.toLowerCase().includes(query);
@@ -290,7 +290,7 @@ export const useTasksStore = create<TasksState>()(
       });
     },
 
-    // 获取任务统计
+    // Get task statistics
     getTaskStats: () => {
       const tasks = get().tasks;
       return {
@@ -304,11 +304,11 @@ export const useTasksStore = create<TasksState>()(
   }))
 );
 
-// 生成DAG可视化数据的辅助函数
+// Helper to generate DAG visualization data
 function generateDagData(tasks: Task[]): { nodes: DAGNode[]; edges: DAGEdge[] } {
   const nodes: DAGNode[] = tasks.map((task) => ({
     id: task.id.toString(),
-    label: task.name.replace(/^\[.*?\]\s*/, ''), // 移除计划前缀
+    label: task.name.replace(/^\[.*?\]\s*/, ''), // Remove plan prefix
     group: task.task_type,
     status: task.status,
     level: task.depth,
@@ -316,7 +316,7 @@ function generateDagData(tasks: Task[]): { nodes: DAGNode[]; edges: DAGEdge[] } 
 
   const edges: DAGEdge[] = [];
   
-  // 基于parent_id生成边
+  // Generate edges based on parent_id
   tasks.forEach((task) => {
     if (task.parent_id) {
       edges.push({

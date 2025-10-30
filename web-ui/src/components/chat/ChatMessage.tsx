@@ -28,34 +28,34 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const { saveMessageAsMemory } = useChatStore();
   const [isSaving, setIsSaving] = useState(false);
 
-  // 复制消息内容
+  // Copy message content
   const handleCopy = () => {
     navigator.clipboard.writeText(content);
   };
 
-  // 保存为记忆
+  // Save message as memory
   const handleSaveAsMemory = async () => {
     try {
       setIsSaving(true);
       await saveMessageAsMemory(message);
-      antMessage.success('✅ 已保存为记忆');
+      antMessage.success('✅ Saved to memory');
     } catch (error) {
-      console.error('保存记忆失败:', error);
-      antMessage.error('❌ 保存失败');
+      console.error('Failed to save memory:', error);
+      antMessage.error('❌ Save failed');
     } finally {
       setIsSaving(false);
     }
   };
 
-  // 格式化时间
+  // Format timestamp
   const formatTime = (date: Date) => {
-    return new Date(date).toLocaleTimeString('zh-CN', {
+    return new Date(date).toLocaleTimeString(undefined, {
       hour: '2-digit',
       minute: '2-digit',
     });
   };
 
-  // 渲染头像
+  // Render avatar
   const renderAvatar = () => {
     const avatarProps = {
       size: 32 as const,
@@ -92,7 +92,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     }
   };
 
-  // 自定义代码块渲染
+  // Custom code block
   const CodeBlock = ({ children, className }: { children: string; className?: string }) => {
     const language = className?.replace('lang-', '') || 'text';
     
@@ -112,7 +112,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     );
   };
 
-  // 渲染消息内容
+  // Render message body
   const renderContent = () => {
     if (type === 'system') {
       return (
@@ -168,7 +168,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     );
   };
 
-  // 渲染元数据
+  // Render metadata
   const renderMetadata = () => {
     if (!metadata) return null;
 
@@ -181,7 +181,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     return (
       <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
         <div>
-          关联计划:
+          Linked plan:
           {planTitle ? ` ${planTitle}` : ''}
           {planId !== undefined && planId !== null ? ` (#${planId})` : ''}
         </div>
@@ -215,7 +215,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     return (
       <div style={{ marginTop: 12 }}>
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          <Text strong>动作摘要</Text>
+          <Text strong>Action summary</Text>
           <div>
             {summaryItems.map((item, index) => {
               const order = typeof item.order === 'number' ? item.order : index + 1;
@@ -230,7 +230,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               return (
                 <div key={`${order}_${kind}_${name}`} style={{ fontSize: 12, color: '#555', marginBottom: 4 }}>
                   <Text>
-                    {icon} 步骤 {order}: {kind}
+                    {icon} Step {order}: {kind}
                     {name}
                     {messageText}
                   </Text>
@@ -284,7 +284,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             
             {type !== 'system' && (
               <Space size={4}>
-                <Tooltip title="复制">
+                <Tooltip title="Copy">
                   <Button
                     type="text"
                     size="small"
@@ -294,7 +294,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                   />
                 </Tooltip>
 
-                <Tooltip title="保存为记忆">
+                <Tooltip title="Save to memory">
                   <Button
                     type="text"
                     size="small"
@@ -306,7 +306,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                 </Tooltip>
 
                 {type === 'assistant' && (
-                  <Tooltip title="重新生成">
+                  <Tooltip title="Regenerate">
                     <Button
                       type="text"
                       size="small"

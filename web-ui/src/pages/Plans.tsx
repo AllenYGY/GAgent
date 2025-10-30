@@ -81,7 +81,7 @@ const PlansPage: React.FC = () => {
 
   const planResults: PlanResultItem[] = planResultsResponse?.items ?? [];
 
-  // 统计信息
+  // Aggregate plan/task statistics
   const planStats = useMemo(() => {
     if (!planTasks || planTasks.length === 0) {
       return null;
@@ -347,12 +347,12 @@ const PlansPage: React.FC = () => {
       <div className="content-header">
         <Title level={3} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <ApartmentOutlined />
-          计划与DAG可视化
+          Plans & DAG Explorer
         </Title>
         <Space>
-          <Tooltip title="刷新计划列表与任务">
+          <Tooltip title="Reload plans and tasks">
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-              刷新
+              Refresh
             </Button>
           </Tooltip>
         </Space>
@@ -362,10 +362,10 @@ const PlansPage: React.FC = () => {
         <Card>
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Space wrap>
-              <Text strong>选择计划：</Text>
+              <Text strong>Select plan:</Text>
               <Select
                 style={{ minWidth: 260 }}
-                placeholder={summariesLoading ? '加载计划中...' : '请选择计划'}
+                placeholder={summariesLoading ? 'Loading plans...' : 'Pick a plan'}
                 loading={summariesLoading}
                 value={selectedPlanId}
                 onChange={handlePlanChange}
@@ -373,19 +373,19 @@ const PlansPage: React.FC = () => {
               />
               {statusSummary && (
                 <Space size="middle">
-                  <Tag color="blue">任务数 {statusSummary.total}</Tag>
-                  <Tag color="green">已完成 {statusSummary.completed}</Tag>
-                  <Tag color="gold">待处理 {statusSummary.pending}</Tag>
-                  {statusSummary.running > 0 && <Tag color="cyan">进行中 {statusSummary.running}</Tag>}
-                  {statusSummary.failed > 0 && <Tag color="red">失败 {statusSummary.failed}</Tag>}
-                  {statusSummary.skipped > 0 && <Tag color="volcano">已跳过 {statusSummary.skipped}</Tag>}
+                  <Tag color="blue">Tasks {statusSummary.total}</Tag>
+                  <Tag color="green">Completed {statusSummary.completed}</Tag>
+                  <Tag color="gold">Pending {statusSummary.pending}</Tag>
+                  {statusSummary.running > 0 && <Tag color="cyan">Running {statusSummary.running}</Tag>}
+                  {statusSummary.failed > 0 && <Tag color="red">Failed {statusSummary.failed}</Tag>}
+                  {statusSummary.skipped > 0 && <Tag color="volcano">Skipped {statusSummary.skipped}</Tag>}
                 </Space>
               )}
               {planStats && (
                 <Space size="middle">
-                  <Tag color="purple">根任务 {planStats.root}</Tag>
-                  <Tag color="geekblue">复合任务 {planStats.composite}</Tag>
-                  <Tag color="green">原子任务 {planStats.atomic}</Tag>
+                  <Tag color="purple">Root {planStats.root}</Tag>
+                  <Tag color="geekblue">Composite {planStats.composite}</Tag>
+                  <Tag color="green">Atomic {planStats.atomic}</Tag>
                 </Space>
               )}
             </Space>
@@ -400,27 +400,27 @@ const PlansPage: React.FC = () => {
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={summariesLoading ? '加载中...' : '暂无可用计划，请先通过聊天或CLI创建计划'}
+                description={summariesLoading ? 'Loading...' : 'No plans available yet. Create one via chat or CLI.'}
               />
             )}
           </Space>
         </Card>
 
         <Card
-          title="计划执行结果"
+          title="Plan execution outputs"
           bordered={false}
           extra={
             <Space>
-              <Tooltip title={onlyWithOutput ? '仅显示有输出的任务' : '显示全部任务'}>
+              <Tooltip title={onlyWithOutput ? 'Show tasks with outputs only' : 'Show all tasks'}>
                 <Switch
                   size="small"
                   checked={onlyWithOutput}
                   onChange={handleToggleOutput}
-                  checkedChildren="仅输出"
-                  unCheckedChildren="全部"
+                  checkedChildren="Outputs"
+                  unCheckedChildren="All"
                 />
               </Tooltip>
-              <Tooltip title="刷新执行结果">
+              <Tooltip title="Refresh execution results">
                 <Button icon={<ReloadOutlined />} onClick={handleResultsRefresh} />
               </Tooltip>
             </Space>
@@ -432,26 +432,26 @@ const PlansPage: React.FC = () => {
                 {statusSummary ? (
                   <Row gutter={[16, 16]}>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="任务总数" value={statusSummary.total} />
+                      <Statistic title="Total tasks" value={statusSummary.total} />
                     </Col>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="已完成" value={statusSummary.completed} />
+                      <Statistic title="Completed" value={statusSummary.completed} />
                     </Col>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="进行中" value={statusSummary.running} />
+                      <Statistic title="Running" value={statusSummary.running} />
                     </Col>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="待处理" value={statusSummary.pending} />
+                      <Statistic title="Pending" value={statusSummary.pending} />
                     </Col>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="失败" value={statusSummary.failed} valueStyle={{ color: statusSummary.failed > 0 ? '#ff4d4f' : undefined }} />
+                      <Statistic title="Failed" value={statusSummary.failed} valueStyle={{ color: statusSummary.failed > 0 ? '#ff4d4f' : undefined }} />
                     </Col>
                     <Col xs={12} sm={8} lg={4}>
-                      <Statistic title="已跳过" value={statusSummary.skipped} />
+                      <Statistic title="Skipped" value={statusSummary.skipped} />
                     </Col>
                   </Row>
                 ) : (
-                  <Text type="secondary">暂无统计信息，执行计划后再试。</Text>
+                  <Text type="secondary">No execution stats yet. Run the plan to generate outputs.</Text>
                 )}
               </Spin>
               <Row gutter={[16, 16]}>
@@ -486,7 +486,7 @@ const PlansPage: React.FC = () => {
                             <List.Item.Meta
                               title={
                                 <Space size={8} wrap>
-                                  <Text strong>{item.name || `任务 #${item.task_id}`}</Text>
+                                  <Text strong>{item.name || `Task #${item.task_id}`}</Text>
                                   {renderStatusBadge(item.status)}
                                 </Space>
                               }
@@ -495,7 +495,7 @@ const PlansPage: React.FC = () => {
                                   {item.content ? (
                                     <Text ellipsis={{ tooltip: item.content }}>{item.content}</Text>
                                   ) : (
-                                    <Text type="secondary">暂无输出内容</Text>
+                                    <Text type="secondary">No output yet</Text>
                                   )}
                                   {item.notes && item.notes.length > 0 && (
                                     <Text type="secondary">
@@ -513,10 +513,10 @@ const PlansPage: React.FC = () => {
                         image={Empty.PRESENTED_IMAGE_SIMPLE}
                         description={
                           resultsLoading
-                            ? '加载执行输出中...'
+                            ? 'Loading execution outputs...'
                             : onlyWithOutput
-                            ? '暂无任务执行输出，尝试执行计划或显示全部任务'
-                            : '当前计划尚无任务'
+                            ? 'No task outputs yet—run the plan or toggle to show all tasks.'
+                            : 'No tasks available in this plan.'
                         }
                       />
                     )}
@@ -526,47 +526,47 @@ const PlansPage: React.FC = () => {
                   <Spin spinning={resultsLoading && !selectedResult}>
                     {selectedResult ? (
                       <Descriptions column={1} size="small" bordered>
-                        <Descriptions.Item label="任务名称">
+                        <Descriptions.Item label="Task name">
                           {selectedResult.name ||
                             selectedResultTask?.name ||
-                            `任务 #${selectedResult.task_id}`}
+                            `Task #${selectedResult.task_id}`}
                         </Descriptions.Item>
-                        <Descriptions.Item label="状态">
+                        <Descriptions.Item label="Status">
                           {renderStatusBadge(selectedResult.status ?? selectedResultTask?.status)}
                         </Descriptions.Item>
-                        <Descriptions.Item label="任务ID">
+                        <Descriptions.Item label="Task ID">
                           #{selectedResult.task_id}
                         </Descriptions.Item>
                         {selectedResultTask?.parent_id && (
-                          <Descriptions.Item label="父任务">
+                          <Descriptions.Item label="Parent task">
                             #{selectedResultTask.parent_id}
                           </Descriptions.Item>
                         )}
                         {selectedResultTask?.instruction && (
-                          <Descriptions.Item label="任务指令">
+                          <Descriptions.Item label="Instruction">
                             <Paragraph
                               style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}
-                              ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}
+                              ellipsis={{ rows: 4, expandable: true, symbol: 'expand' }}
                             >
                               {selectedResultTask.instruction}
                             </Paragraph>
                           </Descriptions.Item>
                         )}
-                        <Descriptions.Item label="输出内容">
+                        <Descriptions.Item label="Output">
                           {selectedResult.content ? (
                             <Paragraph
                               style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}
                               copyable={{ text: selectedResult.content }}
-                              ellipsis={{ rows: 6, expandable: true, symbol: '展开' }}
+                              ellipsis={{ rows: 6, expandable: true, symbol: 'expand' }}
                             >
                               {selectedResult.content}
                             </Paragraph>
                           ) : (
-                            <Text type="secondary">暂无输出内容</Text>
+                            <Text type="secondary">No output captured</Text>
                           )}
                         </Descriptions.Item>
                         {selectedResult.notes && selectedResult.notes.length > 0 && (
-                          <Descriptions.Item label="备注">
+                          <Descriptions.Item label="Notes">
                             <Space direction="vertical" size={0}>
                               {selectedResult.notes.map((note, index) => (
                                 <Text key={index} type="secondary">
@@ -578,13 +578,13 @@ const PlansPage: React.FC = () => {
                         )}
                         {selectedResultTask?.dependencies &&
                           selectedResultTask.dependencies.length > 0 && (
-                            <Descriptions.Item label="依赖任务">
+                            <Descriptions.Item label="Dependencies">
                               {selectedResultTask.dependencies.map((dep) => `#${dep}`).join(', ')}
                             </Descriptions.Item>
                           )}
                         {selectedResult.metadata &&
                           Object.keys(selectedResult.metadata).length > 0 && (
-                            <Descriptions.Item label="元数据">
+                            <Descriptions.Item label="Metadata">
                               <Space direction="vertical" size={0}>
                                 {Object.entries(selectedResult.metadata).map(([key, value]) => (
                                   <Text key={key} type="secondary">
@@ -595,7 +595,7 @@ const PlansPage: React.FC = () => {
                             </Descriptions.Item>
                           )}
                         {selectedResult.raw && (
-                          <Descriptions.Item label="原始载荷">
+                          <Descriptions.Item label="Raw payload">
                             <pre
                               style={{
                                 background: '#f5f5f5',
@@ -616,8 +616,8 @@ const PlansPage: React.FC = () => {
                         image={Empty.PRESENTED_IMAGE_SIMPLE}
                         description={
                           planResults.length === 0
-                            ? '暂无执行输出'
-                            : '请选择左侧任务查看执行详情'
+                            ? 'No execution output available.'
+                            : 'Select a task on the left to inspect the details.'
                         }
                       />
                     )}
@@ -626,17 +626,17 @@ const PlansPage: React.FC = () => {
               </Row>
             </Space>
           ) : (
-            <Empty description="请先选择计划" />
+            <Empty description="Select a plan to view execution details." />
           )}
         </Card>
 
-        <Card title="任务详情" bordered={false}>
+        <Card title="Task details" bordered={false}>
           {selectedTask ? (
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="任务名称" span={2}>
+              <Descriptions.Item label="Task name" span={2}>
                 {selectedTask.name}
               </Descriptions.Item>
-              <Descriptions.Item label="任务类型">
+              <Descriptions.Item label="Task type">
                 <Tag color={
                   selectedTask.task_type === 'root'
                     ? 'purple'
@@ -645,13 +645,13 @@ const PlansPage: React.FC = () => {
                     : 'green'
                 }>
                   {selectedTask.task_type === 'root'
-                    ? '根任务'
+                    ? 'Root'
                     : selectedTask.task_type === 'composite'
-                    ? '复合任务'
-                    : '原子任务'}
+                    ? 'Composite'
+                    : 'Atomic'}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label="Status">
                 <Badge
                   status={
                     selectedTask.status === 'completed'
@@ -662,22 +662,22 @@ const PlansPage: React.FC = () => {
                       ? 'error'
                       : 'default'
                   }
-                  text={selectedTask.status || '未知'}
+                  text={selectedTask.status || 'unknown'}
                 />
               </Descriptions.Item>
-              <Descriptions.Item label="层级">
+              <Descriptions.Item label="Depth">
                 {selectedTask.depth ?? 0}
               </Descriptions.Item>
-              <Descriptions.Item label="任务ID">{selectedTask.id}</Descriptions.Item>
-              <Descriptions.Item label="父任务">
-                {selectedTask.parent_id ? `#${selectedTask.parent_id}` : '无'}
+              <Descriptions.Item label="Task ID">{selectedTask.id}</Descriptions.Item>
+              <Descriptions.Item label="Parent task">
+                {selectedTask.parent_id ? `#${selectedTask.parent_id}` : 'None'}
               </Descriptions.Item>
               {selectedTask.instruction && (
-                <Descriptions.Item label="任务指令" span={2}>
+                <Descriptions.Item label="Instruction" span={2}>
                   <Text>{selectedTask.instruction}</Text>
                 </Descriptions.Item>
               )}
-              <Descriptions.Item label="执行结果" span={2}>
+              <Descriptions.Item label="Execution result" span={2}>
                 {executionInfo ? (
                   <Space direction="vertical" size="small">
                     <Badge
@@ -692,7 +692,7 @@ const PlansPage: React.FC = () => {
                           ? 'warning'
                           : 'default'
                       }
-                      text={executionInfo.status ?? '未知'}
+                      text={executionInfo.status ?? 'unknown'}
                     />
                     {executionInfo.content && <Text>{executionInfo.content}</Text>}
                     {executionInfo.notes && executionInfo.notes.length > 0 && (
@@ -706,7 +706,7 @@ const PlansPage: React.FC = () => {
                     )}
                     {executionInfo.metadata && Object.keys(executionInfo.metadata).length > 0 && (
                       <Text type="secondary">
-                        元数据：
+                        Metadata:
                         {Object.entries(executionInfo.metadata)
                           .map(([key, value]) => `${key}=${String(value)}`)
                           .join(', ')}
@@ -714,17 +714,17 @@ const PlansPage: React.FC = () => {
                     )}
                   </Space>
                 ) : (
-                  <Text type="secondary">尚未执行</Text>
+                  <Text type="secondary">Not executed yet</Text>
                 )}
               </Descriptions.Item>
               {selectedPlanSummary?.description && (
-                <Descriptions.Item label="计划描述" span={2}>
+                <Descriptions.Item label="Plan description" span={2}>
                   {selectedPlanSummary.description}
                 </Descriptions.Item>
               )}
             </Descriptions>
           ) : (
-            <Text type="secondary">在图中选择任务节点，可查看详细信息。</Text>
+            <Text type="secondary">Select a task node in the graph to inspect its details.</Text>
           )}
         </Card>
       </div>

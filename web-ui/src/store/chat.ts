@@ -55,7 +55,7 @@ const summaryToChatSession = (summary: ChatSessionSummary): ChatSession => {
   const title =
     rawName ||
     (summary.plan_title && summary.plan_title.trim()) ||
-    `会话 ${summary.id.slice(0, 8)}`;
+    `Session ${summary.id.slice(0, 8)}`;
   const titleSource =
     summary.name_source ??
     (rawName ? (summary.is_user_named ? 'user' : null) : null);
@@ -125,34 +125,34 @@ const pendingAutotitleSessions = new Set<string>();
 const autoTitleHistory = new Map<string, { planId: number | null }>();
 
 interface ChatState {
-  // 聊天数据
+  // Chat data
   currentSession: ChatSession | null;
   sessions: ChatSession[];
   messages: ChatMessage[];
   currentWorkflowId: string | null;
 
-  // 当前上下文
+  // Current context
   currentPlanId: number | null;
   currentPlanTitle: string | null;
   currentTaskId: number | null;
   currentTaskName: string | null;
   defaultSearchProvider: WebSearchProvider | null;
   
-  // 输入状态
+  // Input state
   inputText: string;
   isTyping: boolean;
   isProcessing: boolean;
   isUpdatingProvider: boolean;
   
-  // UI状态
+  // UI state
   chatPanelVisible: boolean;
   chatPanelWidth: number;
 
-  // Memory 相关状态
+  // Memory related state
   memoryEnabled: boolean;
   relevantMemories: Memory[];
 
-  // 操作方法
+  // Actions
   setCurrentSession: (session: ChatSession | null) => void;
   addSession: (session: ChatSession) => void;
   removeSession: (sessionId: string) => void;
@@ -162,22 +162,22 @@ interface ChatState {
   removeMessage: (messageId: string) => void;
   clearMessages: () => void;
   
-  // 输入操作
+  // Input actions
   setInputText: (text: string) => void;
   setIsTyping: (typing: boolean) => void;
   setIsProcessing: (processing: boolean) => void;
   
-  // UI操作
+  // UI actions
   toggleChatPanel: () => void;
   setChatPanelVisible: (visible: boolean) => void;
   setChatPanelWidth: (width: number) => void;
 
-  // 上下文操作
+  // Context actions
   setChatContext: (context: { planId?: number | null; planTitle?: string | null; taskId?: number | null; taskName?: string | null }) => void;
   clearChatContext: () => void;
   setCurrentWorkflowId: (workflowId: string | null) => void;
 
-  // Memory 操作
+  // Memory actions
   toggleMemory: () => void;
   setMemoryEnabled: (enabled: boolean) => void;
   setRelevantMemories: (memories: Memory[]) => void;
@@ -189,7 +189,7 @@ interface ChatState {
     options?: { force?: boolean; strategy?: string | null }
   ) => Promise<ChatSessionAutoTitleResult | null>;
   
-  // 快捷操作
+  // Quick actions
   sendMessage: (content: string, metadata?: ChatMessage['metadata']) => Promise<void>;
   retryLastMessage: () => Promise<void>;
   startNewSession: (title?: string) => ChatSession;
@@ -200,7 +200,7 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>()(
   subscribeWithSelector((set, get) => ({
-    // 初始状态
+    // Initial state
     currentSession: null,
     sessions: [],
     messages: [],
@@ -216,10 +216,10 @@ export const useChatStore = create<ChatState>()(
     isUpdatingProvider: false,
     chatPanelVisible: true,
     chatPanelWidth: 400,
-    memoryEnabled: true, // 默认启用记忆功能
+    memoryEnabled: true, // Enable memory by default
     relevantMemories: [],
 
-    // 设置当前会话
+    // Set current session
     setCurrentSession: (session) => {
       const sessionPlanId = session?.plan_id ?? null;
       const sessionPlanTitle = session?.plan_title ?? null;
@@ -245,7 +245,7 @@ export const useChatStore = create<ChatState>()(
       }
     },
 
-    // 添加会话
+    // Add session
     addSession: (session) => {
       const normalized: ChatSession = {
         ...session,
@@ -261,16 +261,16 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    // 删除会话
+    // Remove session
     removeSession: (sessionId) => {
       autoTitleHistory.delete(sessionId);
       pendingAutotitleSessions.delete(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter(s => s.id !== sessionId);
-        // 更新 localStorage
+        // Update localStorage
         const allSessionIds = newSessions.map(s => s.id);
         SessionStorage.setAllSessionIds(allSessionIds);
-        // 如果删除的是当前会话，清除current_session_id
+        // Clear current session id if the active session was removed
         if (state.currentSession?.id === sessionId) {
           SessionStorage.clearCurrentSessionId();
         }
@@ -292,7 +292,7 @@ export const useChatStore = create<ChatState>()(
           archive ? { archive: true } : undefined
         );
       } catch (error) {
-        console.error('删除会话失败:', error);
+        console.error('Failed to delete session:', error);
         throw error;
       }
 
@@ -341,7 +341,7 @@ export const useChatStore = create<ChatState>()(
           try {
             await get().loadChatHistory(fallbackSession.id);
           } catch (historyError) {
-            console.warn('加载备用会话历史失败:', historyError);
+            console.warn('Failed to load fallback session history:', historyError);
           }
         } else {
           set({
@@ -365,11 +365,11 @@ export const useChatStore = create<ChatState>()(
       );
     },
 
-    // 添加消息
+    // Add message
     addMessage: (message) => set((state) => {
       const newMessages = [...state.messages, message];
       
-      // 更新当前会话
+      // Update current session
       let updatedSession = state.currentSession;
       if (updatedSession) {
         updatedSession = {
@@ -379,7 +379,7 @@ export const useChatStore = create<ChatState>()(
         };
       }
 
-      // 更新会话列表
+      // Update session list
       const updatedSessions = state.sessions.map(session =>
         session.id === updatedSession?.id ? updatedSession : session
       );
@@ -391,13 +391,13 @@ export const useChatStore = create<ChatState>()(
       };
     }),
 
-    // 更新消息
+    // Update message
     updateMessage: (messageId, updates) => set((state) => {
       const updatedMessages = state.messages.map(msg =>
         msg.id === messageId ? { ...msg, ...updates } : msg
       );
 
-      // 更新当前会话
+      // Update current session
       let updatedSession = state.currentSession;
       if (updatedSession) {
         updatedSession = {
@@ -413,15 +413,15 @@ export const useChatStore = create<ChatState>()(
       };
     }),
 
-    // 删除消息
+    // Remove message
     removeMessage: (messageId) => set((state) => ({
       messages: state.messages.filter(msg => msg.id !== messageId),
     })),
 
-    // 清空消息
+    // Clear messages
     clearMessages: () => set({ messages: [] }),
 
-    // 设置聊天上下文
+    // Set chat context
     setChatContext: ({ planId, planTitle, taskId, taskName }) => {
       set((state) => {
         const nextPlanId = planId !== undefined ? planId : state.currentPlanId;
@@ -487,6 +487,7 @@ export const useChatStore = create<ChatState>()(
         };
       }),
 
+    // Set current workflow
     setCurrentWorkflowId: (workflowId) => {
       const state = get();
       if (state.currentWorkflowId === workflowId) {
@@ -516,27 +517,27 @@ export const useChatStore = create<ChatState>()(
       });
     },
 
-    // 设置输入文本
+    // Set input text
     setInputText: (text) => set({ inputText: text }),
 
-    // 设置正在输入状态
+    // Set typing indicator
     setIsTyping: (typing) => set({ isTyping: typing }),
 
-    // 设置处理中状态
+    // Set processing state
     setIsProcessing: (processing) => set({ isProcessing: processing }),
 
-    // 切换聊天面板显示
+    // Toggle chat panel visibility
     toggleChatPanel: () => set((state) => ({
       chatPanelVisible: !state.chatPanelVisible,
     })),
 
-    // 设置聊天面板显示
+    // Set chat panel visibility
     setChatPanelVisible: (visible) => set({ chatPanelVisible: visible }),
 
-    // 设置聊天面板宽度
+    // Set chat panel width
     setChatPanelWidth: (width) => set({ chatPanelWidth: width }),
 
-    // 发送消息
+    // Send message
     sendMessage: async (content, metadata) => {
       const {
         currentPlanTitle,
@@ -581,12 +582,12 @@ export const useChatStore = create<ChatState>()(
           set({ relevantMemories: memories });
           if (memories.length > 0) {
             const memoryContext = memories
-              .map((m) => `[记忆 ${(m.similarity! * 100).toFixed(0)}%] ${m.content}`)
+              .map((m) => `[Memory ${(m.similarity! * 100).toFixed(0)}%] ${m.content}`)
               .join('\n');
-            enhancedContent = `相关记忆:\n${memoryContext}\n\n用户问题: ${content}`;
+            enhancedContent = `Related memories:\n${memoryContext}\n\nUser question: ${content}`;
           }
         } catch (error) {
-          console.error('Memory RAG 查询失败:', error);
+          console.error('Memory RAG query failed:', error);
         }
       }
 
@@ -748,7 +749,7 @@ export const useChatStore = create<ChatState>()(
             if (hasContext) {
               void get()
                 .autotitleSession(sessionKey)
-                .catch((error) => console.warn('自动命名会话失败:', error));
+                .catch((error) => console.warn('Failed to auto-title session:', error));
             }
           }
         }
@@ -833,7 +834,7 @@ export const useChatStore = create<ChatState>()(
                 is_active: true,
               });
             } catch (patchError) {
-              console.warn('同步会话信息失败:', patchError);
+              console.warn('Failed to synchronise session info:', patchError);
             }
           })();
         }
@@ -853,7 +854,7 @@ export const useChatStore = create<ChatState>()(
                 return status;
               }
             } catch (pollError) {
-              console.warn('轮询动作状态失败:', pollError);
+              console.warn('Failed to poll action status:', pollError);
               break;
             }
             await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -875,7 +876,7 @@ export const useChatStore = create<ChatState>()(
             if (!status || (status.status !== 'completed' && status.status !== 'failed')) {
               const timeoutErrors = [
                 ...(existingMetadata.errors ?? []),
-                '后台动作在 120 秒内未完成，请稍后在计划视图刷新。',
+                'The background action did not finish within 120 seconds; please refresh the plan view later.',
               ];
               get().updateMessage(assistantMessageId, {
                 metadata: {
@@ -952,7 +953,7 @@ export const useChatStore = create<ChatState>()(
 
             const contentWithStatus =
               status.status === 'failed' && finalErrors.length
-                ? `${messageAtUpdate.content}\n\n⚠️ 后台执行失败：${finalErrors.join('; ')}`
+                ? `${messageAtUpdate.content}\n\n⚠️ Background execution failed: ${finalErrors.join('; ')}`
                 : messageAtUpdate.content;
 
             get().updateMessage(assistantMessageId, {
@@ -1027,7 +1028,7 @@ export const useChatStore = create<ChatState>()(
                   is_active: status.status === 'completed',
                 });
               } catch (patchError) {
-                console.warn('同步会话信息失败:', patchError);
+                console.warn('Failed to synchronise session info:', patchError);
               }
             }
           })();
@@ -1039,13 +1040,13 @@ export const useChatStore = create<ChatState>()(
           id: `msg_${Date.now()}_assistant`,
           type: 'assistant',
           content:
-            '抱歉，我暂时无法处理你的请求。可能的原因：\n\n1. 后端服务未完全启动\n2. LLM API 未配置\n3. 网络连接问题\n\n请检查后端服务状态，或稍后重试。',
+            'Sorry, I cannot process your request right now. Possible reasons:\n\n1. Backend services are not fully started\n2. The LLM API is not configured\n3. Network connectivity issues\n\nPlease verify the backend status or try again later.',
           timestamp: new Date(),
         };
         get().addMessage(errorMessage);
       }
     },
-    // 重试最后一条消息
+    // Retry the last user message
     retryLastMessage: async () => {
       const { messages } = get();
       const lastUserMessage = [...messages].reverse().find(msg => msg.type === 'user');
@@ -1055,14 +1056,14 @@ export const useChatStore = create<ChatState>()(
       }
     },
 
-    // 开始新会话（总是生成新的ID）
+    // Start a new session (always generates a new ID)
     startNewSession: (title) => {
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const providerPreference = get().defaultSearchProvider ?? null;
       autoTitleHistory.delete(sessionId);
       const session: ChatSession = {
         id: sessionId,
-        title: title || `对话 ${new Date().toLocaleString()}`,
+        title: title || `Conversation ${new Date().toLocaleString()}`,
         messages: [],
         created_at: new Date(),
         updated_at: new Date(),
@@ -1079,23 +1080,23 @@ export const useChatStore = create<ChatState>()(
         isUserNamed: false,
       };
 
-      console.log('🆕 创建新会话:', {
-        前端会话ID: session.id,
-        后端会话ID: session.session_id,
-        标题: session.title
+      console.log('🆕 Created new session:', {
+        frontendSessionId: session.id,
+        backendSessionId: session.session_id,
+        title: session.title,
       });
 
       get().addSession(session);
       get().setCurrentSession(session);
       set({ currentWorkflowId: null });
       
-      // 保存当前会话ID和所有会话ID列表
+      // Persist the current session id and all session ids
       SessionStorage.setCurrentSessionId(sessionId);
 
       return session;
     },
 
-    // 恢复已有会话（用于刷新后保持历史）
+    // Restore an existing session (used after refresh)
     restoreSession: async (sessionId, title) => {
       let session = get().sessions.find((s) => s.id === sessionId) || null;
 
@@ -1109,7 +1110,7 @@ export const useChatStore = create<ChatState>()(
         autoTitleHistory.delete(sessionId);
         session = {
           id: sessionId,
-          title: title || `对话 ${new Date().toLocaleString()}`,
+          title: title || `Conversation ${new Date().toLocaleString()}`,
           messages: [],
           created_at: new Date(),
           updated_at: new Date(),
@@ -1141,10 +1142,10 @@ export const useChatStore = create<ChatState>()(
       return refreshedSession || session;
     },
 
-    // 加载聊天历史
+    // Load chat history
     loadChatHistory: async (sessionId: string) => {
       try {
-        console.log('📖 加载聊天历史:', sessionId);
+        console.log('📖 Loading chat history:', sessionId);
         const response = await fetch(`${ENV.API_BASE_URL}/chat/history/${sessionId}?limit=100`);
         
         if (!response.ok) {
@@ -1154,9 +1155,9 @@ export const useChatStore = create<ChatState>()(
         const data = await response.json();
         
         if (data.success && data.messages && data.messages.length > 0) {
-          console.log(`✅ 加载了 ${data.messages.length} 条历史消息`);
+          console.log(`✅ Loaded ${data.messages.length} historical messages`);
           
-          // 转换后端消息格式为前端格式
+          // Convert backend messages into frontend format
       const messages: ChatMessage[] = data.messages.map((msg: any, index: number) => {
         const metadata =
           msg.metadata && typeof msg.metadata === 'object'
@@ -1175,7 +1176,7 @@ export const useChatStore = create<ChatState>()(
             };
           });
           
-          // 更新消息列表
+          // Update message list
           set({ messages });
           
           const planContext = derivePlanContextFromMessages(messages);
@@ -1219,15 +1220,15 @@ export const useChatStore = create<ChatState>()(
             };
           });
         } else {
-          console.log('📭 没有历史消息');
+          console.log('📭 No historical messages available');
         }
       } catch (error) {
-        console.error('加载聊天历史失败:', error);
+        console.error('Failed to load chat history:', error);
         throw error;
       }
     },
 
-    // Memory 操作方法
+    // Memory helpers
     toggleMemory: () => set((state) => ({ memoryEnabled: !state.memoryEnabled })),
 
     setMemoryEnabled: (enabled) => set({ memoryEnabled: enabled }),
@@ -1236,20 +1237,20 @@ export const useChatStore = create<ChatState>()(
 
     saveMessageAsMemory: async (message, memoryType = 'conversation', importance = 'medium') => {
       try {
-        console.log('💾 保存消息为记忆:', { content: message.content.substring(0, 50) });
+        console.log('💾 Saving message to memory:', { content: message.content.substring(0, 50) });
 
         await memoryApi.saveMemory({
           content: message.content,
           memory_type: memoryType as any,
           importance: importance as any,
           tags: ['chat', 'manual_saved'],
-          context: `对话保存于 ${new Date().toLocaleString()}`,
+          context: `Conversation saved at ${new Date().toLocaleString()}`,
           related_task_id: message.metadata?.task_id
         });
 
-        console.log('✅ 消息已保存为记忆');
+        console.log('✅ Message saved to memory');
       } catch (error) {
-        console.error('❌ 保存记忆失败:', error);
+        console.error('❌ Failed to save memory:', error);
         throw error;
       }
     },
@@ -1294,7 +1295,7 @@ export const useChatStore = create<ChatState>()(
           settings: { default_search_provider: normalized },
         });
       } catch (error) {
-        console.error('更新默认搜索提供商失败:', error);
+        console.error('Failed to update default search provider:', error);
         set((state) => ({
           defaultSearchProvider: prevProvider,
           isUpdatingProvider: false,
@@ -1391,7 +1392,7 @@ export const useChatStore = create<ChatState>()(
 
         return result;
       } catch (error) {
-        console.warn('自动生成会话标题失败:', error);
+        console.warn('Failed to generate session title automatically:', error);
         throw error;
       } finally {
         pendingAutotitleSessions.delete(sessionKey);
@@ -1456,7 +1457,7 @@ export const useChatStore = create<ChatState>()(
           SessionStorage.clearCurrentSessionId();
         }
       } catch (error) {
-        console.error('加载会话列表失败:', error);
+        console.error('Failed to load session list:', error);
         throw error;
       }
     },

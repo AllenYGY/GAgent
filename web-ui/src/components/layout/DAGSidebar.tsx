@@ -39,7 +39,7 @@ const DAGSidebar: React.FC = () => {
     currentPlanTitle ?? undefined
   );
 
-  // 稳定化session_id以避免无限循环
+  // Stabilise session_id to avoid loops
   const sessionId = currentSession?.session_id;
   
   const {
@@ -48,9 +48,9 @@ const DAGSidebar: React.FC = () => {
     refetch: refetchTasks,
   } = usePlanTasks({ planId: currentPlanId ?? undefined });
 
-  // 移除错误的useCallback包装
+  // (Removed incorrect useCallback wrapper)
 
-  // 监听全局任务更新事件，自动刷新侧栏DAG数据
+  // Listen for global task updates to refresh the DAG view
   useEffect(() => {
     const handleTasksUpdated = (event: CustomEvent<PlanSyncEventDetail>) => {
       const detail = event.detail;
@@ -145,7 +145,7 @@ const DAGSidebar: React.FC = () => {
       flexDirection: 'column',
       background: 'white',
     }}>
-      {/* 头部 */}
+      {/* Header */}
       <div style={{ 
         padding: '16px',
         borderBottom: '1px solid #f0f0f0',
@@ -155,12 +155,12 @@ const DAGSidebar: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <NodeIndexOutlined style={{ color: '#1890ff', fontSize: 18 }} />
             <Title level={5} style={{ margin: 0 }}>
-              任务图谱
-            </Title>
+              Task graph
+          </Title>
           </div>
           
           <Space size={4}>
-            <Tooltip title={dagVisible ? '隐藏图谱' : '显示图谱'}>
+            <Tooltip title={dagVisible ? 'Hide graph' : 'Show graph'}>
               <Button
                 type="text"
                 size="small"
@@ -169,7 +169,7 @@ const DAGSidebar: React.FC = () => {
               />
             </Tooltip>
             
-            <Tooltip title="全屏查看">
+            <Tooltip title="View fullscreen">
               <Button
                 type="text"
                 size="small"
@@ -177,7 +177,7 @@ const DAGSidebar: React.FC = () => {
               />
             </Tooltip>
             
-            <Tooltip title="设置">
+            <Tooltip title="Settings">
               <Button
                 type="text"
                 size="small"
@@ -187,26 +187,26 @@ const DAGSidebar: React.FC = () => {
           </Space>
         </div>
 
-        {/* 统计信息 */}
+        {/* Statistics */}
         <Space size={16} wrap>
           <Badge count={stats.total} size="small" offset={[8, -2]}>
-            <Text type="secondary" style={{ fontSize: 12 }}>总任务</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Total tasks</Text>
           </Badge>
           <Badge count={stats.running} size="small" color="blue" offset={[8, -2]}>
-            <Text type="secondary" style={{ fontSize: 12 }}>运行中</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Running</Text>
           </Badge>
           <Badge count={stats.completed} size="small" color="green" offset={[8, -2]}>
-            <Text type="secondary" style={{ fontSize: 12 }}>已完成</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Completed</Text>
           </Badge>
           {stats.failed > 0 && (
             <Badge count={stats.failed} size="small" color="red" offset={[8, -2]}>
-              <Text type="secondary" style={{ fontSize: 12 }}>失败</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>Failed</Text>
             </Badge>
           )}
         </Space>
 
         <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 12 }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>当前ROOT任务：</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>Current ROOT task:</Text>
           <div
             style={{ 
               padding: '6px 12px',
@@ -217,15 +217,15 @@ const DAGSidebar: React.FC = () => {
               color: selectedPlanTitle ? '#262626' : '#8c8c8c'
             }}
           >
-            {selectedPlanTitle || '暂无ROOT任务'}
+            {selectedPlanTitle || 'No ROOT task yet'}
           </div>
           <Text type="secondary" style={{ fontSize: 10, color: '#999' }}>
-            💡 一个对话对应一个ROOT任务，所有子任务都从此展开
+            💡 Each conversation anchors a ROOT task; all subtasks expand from here.
           </Text>
         </Space>
       </div>
 
-      {/* DAG可视化区域 */}
+      {/* DAG visualisation */}
       {dagVisible && (
         <div style={{ 
           flex: 1,
@@ -261,17 +261,17 @@ const DAGSidebar: React.FC = () => {
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={
                 planTasksLoading
-                  ? '加载任务中...'
+                  ? 'Loading tasks...'
                   : (currentWorkflowId || currentSession?.session_id)
-                    ? '当前会话尚无任务'
-                    : '请先开始一个对话或创建工作流'
+                    ? 'No tasks yet for this conversation.'
+                    : 'Start a conversation or create a workflow to see tasks.'
               }
             />
           )}
         </div>
       )}
 
-      {/* 底部操作 */}
+      {/* Footer actions */}
       <div style={{ 
         padding: '12px 16px',
         borderTop: '1px solid #f0f0f0',
@@ -284,16 +284,16 @@ const DAGSidebar: React.FC = () => {
             onClick={handleRefresh}
             loading={planTasksLoading}
           >
-            刷新
+            Refresh
           </Button>
           <Button size="small" icon={<FullscreenOutlined />}>
-            全屏
+            Fullscreen
           </Button>
         </Space>
         
         <div style={{ textAlign: 'center', marginTop: 8 }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            实时任务可视化
+            Live task visualisation
           </Text>
         </div>
       </div>

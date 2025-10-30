@@ -9,11 +9,11 @@ const ChatLayout: React.FC = () => {
   return (
     <>
       <Layout style={{
-        height: 'calc(100vh - 64px)', // 减去 header 高度
+        height: 'calc(100vh - 64px)', // Subtract header height
         overflow: 'hidden',
-        margin: '-24px', // 抵消外层 Content 的 padding
+        margin: '-24px', // Offset parent Content padding
       }}>
-        {/* 左侧对话列表 */}
+        {/* Left conversation list */}
         <Layout.Sider 
           width={280} 
           style={{ 
@@ -24,19 +24,19 @@ const ChatLayout: React.FC = () => {
           <ChatSidebar />
         </Layout.Sider>
 
-        {/* 中间聊天主区域 */}
+        {/* Main chat area */}
         <Layout.Content 
           style={{ 
             background: 'white',
             display: 'flex',
             flexDirection: 'column',
-            minWidth: 0 // 防止flex子元素溢出
+            minWidth: 0 // Prevent flex children overflow
           }}
         >
           <ChatMainArea />
         </Layout.Content>
 
-        {/* 右侧DAG可视化 */}
+        {/* Right-hand DAG visualization */}
         <Layout.Sider 
           width={400} 
           style={{ 

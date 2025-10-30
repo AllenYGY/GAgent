@@ -2,12 +2,12 @@ import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { App as AntdApp, ConfigProvider, theme } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
 import App from './App';
 import { queryClient } from '@/queryClient';
 import './styles/index.css';
 
-// Ant Design 主题配置
+// Ant Design theme configuration
 const antdTheme = {
   algorithm: theme.defaultAlgorithm,
   token: {
@@ -39,7 +39,7 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>
-    <ConfigProvider locale={zhCN} theme={antdTheme}>
+    <ConfigProvider locale={enUS} theme={antdTheme}>
       <AntdApp>
         <RouterProvider router={router} />
       </AntdApp>

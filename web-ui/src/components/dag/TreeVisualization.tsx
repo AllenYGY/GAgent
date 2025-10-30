@@ -46,7 +46,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     setTaskStats: state.setTaskStats,
   }));
 
-  // 状态图标映射
+  // Status icon mapping
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -65,7 +65,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     }
   };
 
-  // 任务类型图标
+  // Task-type icon
   const getTypeIcon = (taskType?: string) => {
     if (!taskType) return '📄';
     
@@ -81,7 +81,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     }
   };
 
-  // 状态颜色
+  // Status colour map
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -100,14 +100,14 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     }
   };
 
-  // 加载任务数据
+  // Load tasks from the API
   const loadTasks = useCallback(async () => {
     try {
       setLoading(true);
       console.log('🔄 Loading tasks for Tree visualization...');
 
       if (!currentPlanId) {
-        console.warn('⚠️ 当前无绑定计划，跳过任务加载');
+        console.warn('⚠️ No plan bound; skipping task load.');
         setTasks([]);
         setStats(null);
         updateStoreTasks([]);
@@ -133,34 +133,34 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
       setTaskStats(computedStats);
     } catch (error: any) {
       console.error('❌ Failed to load tasks:', error);
-      message.error(`加载任务数据失败: ${error.message}`);
+      message.error(`Failed to load task data: ${error.message}`);
     } finally {
       setLoading(false);
     }
   }, [currentPlanId, setTaskStats, updateStoreTasks]);
 
-  // 构建树形结构
+  // Build a nested tree
   const buildTree = (): TreeNode[] => {
     let filteredTasks = tasks;
 
-    // 应用搜索过滤
+    // Apply search filter
     if (searchText) {
       filteredTasks = filteredTasks.filter(task =>
         task.name.toLowerCase().includes(searchText.toLowerCase())
       );
     }
 
-    // 应用状态过滤
+    // Apply status filter
     if (statusFilter !== 'all') {
       filteredTasks = filteredTasks.filter(task => task.status === statusFilter);
     }
 
-    // 找到ROOT任务
+    // Locate ROOT tasks
     const roots = filteredTasks
       .filter(task => !task.parent_id || task.task_type?.toLowerCase() === 'root')
       .sort(compareTaskOrder);
 
-    // 递归构建树
+    // Recursively build children
     const buildNode = (task: TaskType): TreeNode => {
       const children = filteredTasks
         .filter(t => t.parent_id === task.id)
@@ -173,7 +173,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     return roots.map(root => buildNode(root));
   };
 
-  // 切换节点折叠状态
+  // Toggle collapse state
   const toggleCollapse = (taskId: number) => {
     setCollapsed(prev => {
       const newSet = new Set(prev);
@@ -186,7 +186,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     });
   };
 
-  // 渲染树节点
+  // Render an individual tree node
   const renderTreeNode = (
     node: TreeNode,
     isLast: boolean,
@@ -197,17 +197,17 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     const hasChildren = children.length > 0;
     const isCollapsed = collapsed.has(task.id);
     
-    // 清理任务名称
+    // Clean the visible name
     const cleanName = task.name.replace(/^(ROOT|COMPOSITE|ATOMIC):\s*/i, '');
     const displayName = cleanName.length > 60 ? cleanName.substring(0, 60) + '...' : cleanName;
     
-    // 树形连接符
+    // Tree connectors
     const connector = isRoot ? '' : (isLast ? '└── ' : '├── ');
     const childPrefix = isRoot ? '' : (isLast ? '    ' : '│   ');
 
     return (
       <div key={task.id} className="tree-node">
-        {/* 当前节点 */}
+        {/* Node header */}
         <div 
           className={`tree-node-content task-type-${task.task_type?.toLowerCase()}`}
           onClick={() => onNodeClick?.(task.id, task)}
@@ -215,7 +215,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
         >
           <span className="tree-connector">{prefix}{connector}</span>
           
-          {/* 折叠按钮 */}
+          {/* Collapse button */}
           {hasChildren && (
             <span 
               className="tree-collapse-btn"
@@ -228,8 +228,8 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
             </span>
           )}
           
-          {/* 任务信息 */}
-          <Tooltip title={`ID: ${task.id} | 状态: ${task.status} | 类型: ${task.task_type} | 深度: ${task.depth}`}>
+          {/* Task metadata */}
+          <Tooltip title={`ID: ${task.id} | Status: ${task.status} | Type: ${task.task_type} | Depth: ${task.depth}`}>
             <span className="tree-node-info">
               <span className="node-type-icon">{getTypeIcon(task.task_type)}</span>
               <span className="node-status-icon">{getStatusIcon(task.status)}</span>
@@ -248,7 +248,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
           </Tooltip>
         </div>
 
-        {/* 子节点 */}
+        {/* Render children */}
         {hasChildren && !isCollapsed && (
           <div className="tree-children">
             {children.map((child, index) =>
@@ -324,7 +324,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     <Card 
       title={
         <Space>
-          <span>🌳 任务树形视图</span>
+          <span>🌳 Task tree view</span>
           {stats && (
             <Badge count={stats.total} style={{ backgroundColor: '#52c41a' }} />
           )}
@@ -334,35 +334,35 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
       extra={
         <Space wrap>
           <Input.Search
-            placeholder="搜索任务"
+            placeholder="Search tasks"
             style={{ width: 200 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             allowClear
           />
           <Select
-            placeholder="状态筛选"
+            placeholder="Filter status"
             style={{ width: 120 }}
             value={statusFilter}
             onChange={setStatusFilter}
             options={[
-              { label: '全部', value: 'all' },
-              { label: '待执行', value: 'pending' },
-              { label: '执行中', value: 'running' },
-              { label: '已完成', value: 'completed' },
-              { label: '失败', value: 'failed' },
+              { label: 'All', value: 'all' },
+              { label: 'Pending', value: 'pending' },
+              { label: 'Running', value: 'running' },
+              { label: 'Completed', value: 'completed' },
+              { label: 'Failed', value: 'failed' },
             ]}
           />
           <Button 
             icon={<ExpandOutlined />} 
             onClick={handleExpandAll}
-            title="展开全部"
+            title="Expand all"
             size="small"
           />
           <Button 
             icon={<CompressOutlined />} 
             onClick={handleCollapseAll}
-            title="折叠全部"
+            title="Collapse all"
             size="small"
           />
           <Button 
@@ -370,12 +370,12 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
             onClick={handleRefresh}
             loading={loading}
           >
-            刷新
+            Refresh
           </Button>
         </Space>
       }
     >
-      <Spin spinning={loading} tip="加载任务数据中...">
+      <Spin spinning={loading} tip="Loading tasks...">
         <div className="tree-visualization-container">
           {treeData.length > 0 ? (
             <div className="tree-content">
@@ -385,9 +385,9 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
             <div className="tree-empty">
               <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999' }}>
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌳</div>
-                <div style={{ fontSize: '16px' }}>暂无任务数据</div>
+                <div style={{ fontSize: '16px' }}>No task data yet</div>
                 <div style={{ fontSize: '12px', marginTop: '8px' }}>
-                  创建一个ROOT任务开始工作吧！
+                  Create a ROOT task to get started!
                 </div>
               </div>
             </div>

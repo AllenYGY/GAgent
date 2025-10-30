@@ -22,14 +22,13 @@ import MemoryGraph from '@components/memory/MemoryGraph';
 import type { Memory } from '@/types';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import 'dayjs/locale/zh-cn';
 
 dayjs.extend(relativeTime);
-dayjs.locale('zh-cn');
+dayjs.locale('en');
 
 const { Search } = Input;
 
-// 防抖hook - 用于搜索输入优化
+// Debounce hook for search input smoothing
 const useDebounce = <T,>(value: T, delay: number): T => {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
@@ -65,17 +64,17 @@ const MemoryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('list');
   const [searchInput, setSearchInput] = useState(filters.search_query);
 
-  // 搜索防抖 - 500ms延迟
+  // Debounce search input for 500 ms
   const debouncedSearchQuery = useDebounce(searchInput, 500);
 
-  // 同步防抖后的搜索值到store
+  // Sync debounced value back to the store
   useEffect(() => {
     if (debouncedSearchQuery !== filters.search_query) {
       setFilters({ search_query: debouncedSearchQuery });
     }
   }, [debouncedSearchQuery]);
 
-  // 获取统计信息
+  // Fetch memory statistics
   const { data: stats, error: statsError, isError: isStatsError } = useQuery({
     queryKey: ['memory-stats'],
     queryFn: () => memoryApi.getStats(),
@@ -83,7 +82,7 @@ const MemoryPage: React.FC = () => {
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
     onError: (error: any) => {
-      message.error(`获取统计信息失败: ${error.message || '网络错误'}`);
+      message.error(`Failed to fetch statistics: ${error.message || 'Network error'}`);
     },
   });
 
@@ -93,7 +92,7 @@ const MemoryPage: React.FC = () => {
     }
   }, [stats, setStats]);
 
-  // 获取记忆列表
+  // Fetch memory list
   const {
     data: queryResult,
     isLoading,
@@ -113,7 +112,7 @@ const MemoryPage: React.FC = () => {
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
     onError: (error: any) => {
-      message.error(`获取记忆列表失败: ${error.message || '网络错误'}`);
+      message.error(`Failed to fetch memory list: ${error.message || 'Network error'}`);
     },
   });
 
@@ -123,35 +122,35 @@ const MemoryPage: React.FC = () => {
     }
   }, [queryResult, setMemories]);
 
-  // 处理刷新操作
+  // Refresh memories
   const handleRefresh = useCallback(async () => {
     try {
       await refetch();
-      message.success('刷新成功');
+      message.success('Refreshed successfully');
     } catch (error: any) {
-      message.error(`刷新失败: ${error.message || '网络错误'}`);
+      message.error(`Refresh failed: ${error.message || 'Network error'}`);
     }
   }, [refetch]);
 
-  // 处理搜索输入
+  // Handle search input changes
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchInput(e.target.value);
   }, []);
 
-  // 处理搜索提交
+  // Trigger search submit
   const handleSearchSubmit = useCallback(() => {
     setFilters({ search_query: searchInput });
     refetch();
   }, [searchInput, setFilters, refetch]);
 
-  // 处理清除筛选
+  // Clear all filters
   const handleClearFilters = useCallback(() => {
     setSearchInput('');
     clearFilters();
     refetch();
   }, [clearFilters, refetch]);
 
-  // 获取类型标签颜色
+  // Map memory type to tag color
   const getMemoryTypeColor = (type: Memory['memory_type']) => {
     const colors = {
       conversation: 'blue',
@@ -162,7 +161,7 @@ const MemoryPage: React.FC = () => {
     return colors[type] || 'default';
   };
 
-  // 获取重要性标签颜色
+  // Map importance level to tag color
   const getImportanceColor = (importance: Memory['importance']) => {
     const colors = {
       critical: 'red',
@@ -174,7 +173,7 @@ const MemoryPage: React.FC = () => {
     return colors[importance] || 'default';
   };
 
-  // 表格列定义
+  // Table column definitions
   const columns = [
     {
       title: 'ID',
@@ -191,7 +190,7 @@ const MemoryPage: React.FC = () => {
       ),
     },
     {
-      title: '内容',
+      title: 'Content',
       dataIndex: 'content',
       key: 'content',
       ellipsis: true,
@@ -202,53 +201,53 @@ const MemoryPage: React.FC = () => {
       ),
     },
     {
-      title: '类型',
+      title: 'Type',
       dataIndex: 'memory_type',
       key: 'memory_type',
       width: 120,
       filters: [
-        { text: '对话', value: 'conversation' },
-        { text: '经验', value: 'experience' },
-        { text: '知识', value: 'knowledge' },
-        { text: '上下文', value: 'context' },
+        { text: 'Conversation', value: 'conversation' },
+        { text: 'Experience', value: 'experience' },
+        { text: 'Knowledge', value: 'knowledge' },
+        { text: 'Context', value: 'context' },
       ],
       onFilter: (value: any, record: Memory) => record.memory_type === value,
       render: (type: Memory['memory_type']) => {
         const labels = {
-          conversation: '对话',
-          experience: '经验',
-          knowledge: '知识',
-          context: '上下文',
+          conversation: 'Conversation',
+          experience: 'Experience',
+          knowledge: 'Knowledge',
+          context: 'Context',
         };
         return <Tag color={getMemoryTypeColor(type)}>{labels[type]}</Tag>;
       },
     },
     {
-      title: '重要性',
+      title: 'Importance',
       dataIndex: 'importance',
       key: 'importance',
       width: 100,
       filters: [
-        { text: '关键', value: 'critical' },
-        { text: '高', value: 'high' },
-        { text: '中', value: 'medium' },
-        { text: '低', value: 'low' },
-        { text: '临时', value: 'temporary' },
+        { text: 'Critical', value: 'critical' },
+        { text: 'High', value: 'high' },
+        { text: 'Medium', value: 'medium' },
+        { text: 'Low', value: 'low' },
+        { text: 'Temporary', value: 'temporary' },
       ],
       onFilter: (value: any, record: Memory) => record.importance === value,
       render: (importance: Memory['importance']) => {
         const labels = {
-          critical: '关键',
-          high: '高',
-          medium: '中',
-          low: '低',
-          temporary: '临时',
+          critical: 'Critical',
+          high: 'High',
+          medium: 'Medium',
+          low: 'Low',
+          temporary: 'Temporary',
         };
         return <Tag color={getImportanceColor(importance)}>{labels[importance]}</Tag>;
       },
     },
     {
-      title: '关键词',
+      title: 'Keywords',
       dataIndex: 'keywords',
       key: 'keywords',
       width: 200,
@@ -262,7 +261,7 @@ const MemoryPage: React.FC = () => {
       ),
     },
     {
-      title: '相似度',
+      title: 'Similarity',
       dataIndex: 'similarity',
       key: 'similarity',
       width: 100,
@@ -274,14 +273,14 @@ const MemoryPage: React.FC = () => {
       sorter: (a: Memory, b: Memory) => (a.similarity || 0) - (b.similarity || 0),
     },
     {
-      title: '检索次数',
+      title: 'Retrievals',
       dataIndex: 'retrieval_count',
       key: 'retrieval_count',
       width: 100,
       sorter: (a: Memory, b: Memory) => a.retrieval_count - b.retrieval_count,
     },
     {
-      title: '创建时间',
+      title: 'Created at',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 160,
@@ -293,13 +292,13 @@ const MemoryPage: React.FC = () => {
       sorter: (a: Memory, b: Memory) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
     {
-      title: '操作',
+      title: 'Actions',
       key: 'action',
       width: 120,
       fixed: 'right' as const,
       render: (_: any, record: Memory) => (
         <Space size="small">
-          <Tooltip title="查看详情">
+          <Tooltip title="View details">
             <Button
               type="text"
               size="small"
@@ -317,23 +316,23 @@ const MemoryPage: React.FC = () => {
 
   return (
     <div>
-      {/* 页面标题 */}
+      {/* Page header */}
       <div className="content-header">
         <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <DatabaseOutlined style={{ color: '#1890ff' }} />
-          记忆管理
+          Memory Manager
         </h2>
         <p style={{ margin: '8px 0 0 0', color: '#666' }}>
-          Memory-MCP 智能记忆系统 - 存储、检索和管理AI记忆
+          Memory-MCP knowledge base – store, retrieve, and curate AI memories
         </p>
       </div>
 
       <div className="content-body">
-        {/* 错误提示 - 统计信息 */}
+        {/* Error banner – stats */}
         {isStatsError && (
           <Alert
-            message="统计信息加载失败"
-            description={`无法获取统计数据: ${(statsError as any)?.message || '网络错误'}。请检查后端服务是否正常运行。`}
+            message="Failed to load statistics"
+            description={`Unable to fetch analytics: ${(statsError as any)?.message || 'Network error'}. Verify backend services.`}
             type="error"
             showIcon
             closable
@@ -341,17 +340,17 @@ const MemoryPage: React.FC = () => {
             style={{ marginBottom: 16 }}
             action={
               <Button size="small" danger onClick={handleRefresh}>
-                重试
+                Retry
               </Button>
             }
           />
         )}
 
-        {/* 错误提示 - 记忆列表 */}
+        {/* Error banner – memories */}
         {isQueryError && (
           <Alert
-            message="记忆列表加载失败"
-            description={`无法获取记忆数据: ${(queryError as any)?.message || '网络错误'}。请检查后端服务是否正常运行。`}
+            message="Failed to load memories"
+            description={`Unable to retrieve memory data: ${(queryError as any)?.message || 'Network error'}. Verify backend services.`}
             type="error"
             showIcon
             closable
@@ -359,19 +358,19 @@ const MemoryPage: React.FC = () => {
             style={{ marginBottom: 16 }}
             action={
               <Button size="small" danger onClick={handleRefresh}>
-                重试
+                Retry
               </Button>
             }
           />
         )}
 
-        {/* 统计看板 */}
+        {/* Metrics board */}
         {stats && !isStatsError && (
           <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
             <Col xs={24} sm={12} md={6}>
               <Card>
                 <Statistic
-                  title="总记忆数"
+                  title="Total memories"
                   value={stats.total_memories}
                   prefix={<DatabaseOutlined />}
                   valueStyle={{ color: '#1890ff' }}
@@ -381,18 +380,18 @@ const MemoryPage: React.FC = () => {
             <Col xs={24} sm={12} md={6}>
               <Card>
                 <Statistic
-                  title="平均连接数"
+                  title="Average links"
                   value={stats.average_connections}
                   precision={1}
                   valueStyle={{ color: '#52c41a' }}
-                  suffix="条"
+                  suffix=" links"
                 />
               </Card>
             </Col>
             <Col xs={24} sm={12} md={6}>
               <Card>
                 <Statistic
-                  title="嵌入覆盖率"
+                  title="Embedding coverage"
                   value={(stats.embedding_coverage * 100).toFixed(1)}
                   valueStyle={{ color: stats.embedding_coverage > 0.8 ? '#52c41a' : '#faad14' }}
                   suffix="%"
@@ -408,7 +407,7 @@ const MemoryPage: React.FC = () => {
             <Col xs={24} sm={12} md={6}>
               <Card>
                 <Statistic
-                  title="进化次数"
+                  title="Evolution count"
                   value={stats.evolution_count || 0}
                   valueStyle={{ color: '#722ed1' }}
                 />
@@ -417,12 +416,12 @@ const MemoryPage: React.FC = () => {
           </Row>
         )}
 
-        {/* 工具栏 */}
+        {/* Toolbar */}
         <Card style={{ marginBottom: 16 }}>
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
             <Space wrap>
               <Search
-                placeholder="搜索记忆内容、关键词、标签..."
+                placeholder="Search memories, keywords, or tags..."
                 allowClear
                 style={{ width: 300 }}
                 value={searchInput}
@@ -434,15 +433,15 @@ const MemoryPage: React.FC = () => {
 
               <Select
                 mode="multiple"
-                placeholder="记忆类型"
+                placeholder="Memory types"
                 style={{ minWidth: 180 }}
                 value={filters.memory_types}
                 onChange={(value) => setFilters({ memory_types: value })}
                 options={[
-                  { label: '对话', value: 'conversation' },
-                  { label: '经验', value: 'experience' },
-                  { label: '知识', value: 'knowledge' },
-                  { label: '上下文', value: 'context' },
+                  { label: 'Conversation', value: 'conversation' },
+                  { label: 'Experience', value: 'experience' },
+                  { label: 'Knowledge', value: 'knowledge' },
+                  { label: 'Context', value: 'context' },
                 ]}
                 maxTagCount="responsive"
                 disabled={isLoading}
@@ -450,16 +449,16 @@ const MemoryPage: React.FC = () => {
 
               <Select
                 mode="multiple"
-                placeholder="重要性"
+                placeholder="Importance"
                 style={{ minWidth: 150 }}
                 value={filters.importance_levels}
                 onChange={(value) => setFilters({ importance_levels: value })}
                 options={[
-                  { label: '关键', value: 'critical' },
-                  { label: '高', value: 'high' },
-                  { label: '中', value: 'medium' },
-                  { label: '低', value: 'low' },
-                  { label: '临时', value: 'temporary' },
+                  { label: 'Critical', value: 'critical' },
+                  { label: 'High', value: 'high' },
+                  { label: 'Medium', value: 'medium' },
+                  { label: 'Low', value: 'low' },
+                  { label: 'Temporary', value: 'temporary' },
                 ]}
                 maxTagCount="responsive"
                 disabled={isLoading}
@@ -470,7 +469,7 @@ const MemoryPage: React.FC = () => {
                 onClick={handleClearFilters}
                 disabled={isLoading}
               >
-                清除筛选
+                Clear filters
               </Button>
             </Space>
 
@@ -480,20 +479,20 @@ const MemoryPage: React.FC = () => {
                 onClick={handleRefresh}
                 loading={isLoading}
               >
-                刷新
+                Refresh
               </Button>
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={() => setIsModalOpen(true)}
               >
-                保存新记忆
+                Save new memory
               </Button>
             </Space>
           </Space>
         </Card>
 
-        {/* 视图切换标签 */}
+        {/* View switcher */}
         <Card>
           <Tabs
             activeKey={activeTab}
@@ -504,7 +503,7 @@ const MemoryPage: React.FC = () => {
                 label: (
                   <span>
                     <UnorderedListOutlined />
-                    列表视图
+                    List view
                   </span>
                 ),
                 children: (
@@ -516,7 +515,7 @@ const MemoryPage: React.FC = () => {
                     pagination={{
                       showSizeChanger: true,
                       showQuickJumper: true,
-                      showTotal: (total) => `共 ${total} 条记忆`,
+                      showTotal: (total) => `Total ${total} memories`,
                       defaultPageSize: 20,
                       pageSizeOptions: ['10', '20', '50', '100'],
                     }}
@@ -529,7 +528,7 @@ const MemoryPage: React.FC = () => {
                 label: (
                   <span>
                     <ApartmentOutlined />
-                    图谱视图
+                    Graph view
                   </span>
                 ),
                 children: (
@@ -547,13 +546,13 @@ const MemoryPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 保存记忆Modal */}
+      {/* Save memory modal */}
       <SaveMemoryModal
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
       />
 
-      {/* 记忆详情Drawer */}
+      {/* Memory detail drawer */}
       <MemoryDetailDrawer
         open={isDetailDrawerOpen}
         onClose={() => setIsDetailDrawerOpen(false)}

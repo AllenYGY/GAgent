@@ -14,8 +14,8 @@ interface State {
 }
 
 /**
- * React错误边界组件
- * 捕获子组件树中的JavaScript错误,记录错误,并显示备用UI
+ * React error boundary that captures JavaScript errors in the component tree,
+ * logs them, and renders a fallback UI.
  */
 const IS_DEV = import.meta.env.DEV;
 
@@ -30,7 +30,7 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    // 更新state以在下一次渲染时显示备用UI
+    // Update state so the next render shows the fallback UI
     return {
       hasError: true,
       error,
@@ -39,7 +39,7 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // 记录错误详情
+    // Log the error details
     console.error('❌ ErrorBoundary caught an error:', error, errorInfo);
 
     this.setState({
@@ -47,7 +47,7 @@ class ErrorBoundary extends Component<Props, State> {
       errorInfo,
     });
 
-    // TODO: 可以在这里将错误发送到错误报告服务
+    // TODO: forward to an error-reporting service
     // logErrorToService(error, errorInfo);
   }
 
@@ -65,29 +65,29 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      // 如果提供了自定义fallback UI,使用它
+      // Respect a custom fallback when provided
       if (this.props.fallback) {
         return this.props.fallback;
       }
 
-      // 默认错误UI
+      // Default fallback UI
       return (
         <div style={{ padding: '48px 24px', maxWidth: '800px', margin: '0 auto' }}>
           <Result
             status="error"
             icon={<CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
-            title="组件渲染失败"
-            subTitle="抱歉,组件在渲染时遇到了错误。请尝试刷新页面或联系技术支持。"
+            title="Component rendering failed"
+            subTitle="Sorry, something went wrong while rendering this component. Try reloading or contact support."
             extra={[
               <Button type="primary" key="reset" onClick={this.handleReset}>
-                重置组件
+                Reset component
               </Button>,
               <Button key="reload" icon={<ReloadOutlined />} onClick={this.handleReload}>
-                刷新页面
+                Reload page
               </Button>,
             ]}
           >
-            {/* 开发环境下显示错误详情 */}
+            {/* Display error details in development */}
             {IS_DEV && this.state.error && (
               <div
                 style={{
@@ -98,7 +98,7 @@ class ErrorBoundary extends Component<Props, State> {
                   marginTop: '24px',
                 }}
               >
-                <h4 style={{ color: '#ff4d4f', marginBottom: '12px' }}>错误详情 (仅开发环境显示)</h4>
+                <h4 style={{ color: '#ff4d4f', marginBottom: '12px' }}>Error details (development only)</h4>
                 <div
                   style={{
                     fontSize: '12px',
@@ -107,7 +107,7 @@ class ErrorBoundary extends Component<Props, State> {
                     marginBottom: '8px',
                   }}
                 >
-                  <strong>错误信息:</strong> {this.state.error.message}
+                  <strong>Message:</strong> {this.state.error.message}
                 </div>
                 {this.state.error.stack && (
                   <pre
@@ -129,7 +129,7 @@ class ErrorBoundary extends Component<Props, State> {
                 {this.state.errorInfo && (
                   <details style={{ marginTop: '12px' }}>
                     <summary style={{ cursor: 'pointer', color: '#1890ff', fontWeight: 'bold' }}>
-                      组件堆栈信息
+                      Component stack trace
                     </summary>
                     <pre
                       style={{

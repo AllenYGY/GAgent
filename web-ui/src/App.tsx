@@ -18,16 +18,16 @@ function App() {
   const { message } = AntdApp.useApp();
   const { setSystemStatus, setApiConnected } = useSystemStore();
 
-  // 初始化系统状态检查
+  // Initialize system status checks
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
       console.error('Unhandled error:', event.error || event.message);
-      message.error(`前端运行错误: ${event.message || '未知错误'}`, 6);
+      message.error(`Frontend runtime error: ${event.message || 'Unknown error'}`, 6);
     };
     const handleRejection = (event: PromiseRejectionEvent) => {
-      const reason = (event.reason && (event.reason.message || event.reason.toString())) || '未知原因';
+      const reason = (event.reason && (event.reason.message || event.reason.toString())) || 'Unknown reason';
       console.error('Unhandled rejection:', event.reason);
-      message.error(`前端未处理的异常: ${reason}`, 6);
+      message.error(`Unhandled frontend exception: ${reason}`, 6);
     };
 
     window.addEventListener('error', handleError);
@@ -38,7 +38,7 @@ function App() {
       console.log('⚡ Running in PRODUCTION mode - using REAL APIs (No Mock)');
 
       try {
-        // 添加延迟确保组件完全挂载
+        // Add a slight delay to ensure components finish mounting
         await new Promise(resolve => setTimeout(resolve, 500));
 
         const healthData = await checkApiHealth();
@@ -59,16 +59,16 @@ function App() {
         });
 
         if (healthData.api_connected) {
-          message.success('🎉 系统连接成功！所有服务正常运行', 5);
+          message.success('🎉 System connected successfully! All services are operational.', 5);
           console.log('✅ GLM API Status:', healthData.llm_status);
         } else {
           console.error('❌ API connection failed');
-          message.error(`❌ 后端服务连接失败！请检查后端是否运行在 ${ENV.API_BASE_URL}`, 10);
+          message.error(`❌ Backend connection failed. Please confirm the service is running at ${ENV.API_BASE_URL}`, 10);
           setApiConnected(false);
         }
       } catch (error) {
         console.error('❌ App initialization failed:', error);
-        message.error('❌ 系统初始化失败！请检查网络连接和后端服务', 10);
+        message.error('❌ App initialization failed. Please check network connectivity and backend services.', 10);
         setApiConnected(false);
         setSystemStatus({
           api_connected: false,

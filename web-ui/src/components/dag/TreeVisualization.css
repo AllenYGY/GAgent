@@ -134,7 +134,7 @@
   min-height: 400px;
 }
 
-/* 滚动条美化 */
+/* Scrollbar styling */
 .tree-visualization-container::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -155,7 +155,7 @@
   background: rgba(24, 144, 255, 0.5);
 }
 
-/* 响应式适配 */
+/* Responsive adjustments */
 @media (max-width: 768px) {
   .tree-visualization-container {
     padding: 10px;
@@ -174,7 +174,7 @@
   }
 }
 
-/* 打印样式 */
+/* Print styles */
 @media print {
   .tree-visualization-container {
     background: white;

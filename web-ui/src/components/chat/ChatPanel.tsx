@@ -39,12 +39,12 @@ const ChatPanel: React.FC = () => {
 
   const { selectedTask, currentPlan } = useTasksStore();
 
-  // 自动滚动到底部
+  // Auto-scroll to the latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 处理发送消息
+  // Send message
   const handleSendMessage = async () => {
     if (!inputText.trim() || isProcessing) return;
 
@@ -56,7 +56,7 @@ const ChatPanel: React.FC = () => {
     await sendMessage(inputText.trim(), metadata);
   };
 
-  // 处理键盘事件
+  // Handle keyboard shortcuts
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -64,18 +64,18 @@ const ChatPanel: React.FC = () => {
     }
   };
 
-  // 处理输入变化
+  // Track input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputText(e.target.value);
   };
 
-  // 快捷操作
+  // Quick actions
   const handleQuickAction = (action: string) => {
     const quickMessages = {
-      create_plan: '帮我创建一个新的计划',
-      list_tasks: '显示当前所有任务',
-      system_status: '查看系统状态',
-      help: '我需要帮助，请告诉我可以做什么',
+      create_plan: 'Please create a new plan.',
+      list_tasks: 'Show all current tasks.',
+      system_status: 'Show the system status.',
+      help: 'What can you do?',
     };
 
     const message = quickMessages[action as keyof typeof quickMessages];
@@ -89,14 +89,14 @@ const ChatPanel: React.FC = () => {
     try {
       await setDefaultSearchProvider((value as 'builtin' | 'perplexity') ?? null);
     } catch (error) {
-      console.error('切换搜索来源失败:', error);
-      message.error('切换搜索来源失败，请稍后重试。');
+      console.error('Failed to switch search provider:', error);
+      message.error('Failed to switch search provider. Please try again later.');
     }
   };
 
   const providerOptions = [
-    { label: '模型内置搜索', value: 'builtin' },
-    { label: 'Perplexity 搜索', value: 'perplexity' },
+    { label: 'Built-in search', value: 'builtin' },
+    { label: 'Perplexity search', value: 'perplexity' },
   ];
 
   const providerValue = defaultSearchProvider ?? undefined;
@@ -107,22 +107,22 @@ const ChatPanel: React.FC = () => {
 
   return (
     <div className="chat-panel">
-      {/* 聊天头部 */}
+      {/* Chat header */}
       <div className="chat-header">
         <Space align="center">
           <Avatar icon={<RobotOutlined />} size="small" />
           <div>
             <Title level={5} style={{ margin: 0 }}>
-              AI 任务编排助手
+              AI Task Orchestration Assistant
             </Title>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {isProcessing ? '正在思考...' : isTyping ? '正在输入...' : '在线'}
+              {isProcessing ? 'Thinking...' : isTyping ? 'Typing...' : 'Online'}
             </Text>
           </div>
         </Space>
 
         <Space>
-          <Tooltip title="清空对话">
+          <Tooltip title="Clear conversation">
             <Button
               type="text"
               size="small"
@@ -133,21 +133,21 @@ const ChatPanel: React.FC = () => {
         </Space>
       </div>
 
-      {/* 消息列表 */}
+      {/* Message list */}
       <div className="chat-messages">
         {messages.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
             <MessageOutlined style={{ fontSize: 32, marginBottom: 16 }} />
             <div>
-              <Text>你好！我是AI任务编排助手</Text>
+              <Text>Hello! I'm your AI task orchestration assistant.</Text>
             </div>
             <div style={{ marginTop: 8 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                我可以帮你创建计划、管理任务、执行调度等
+                I can help you create plans, manage tasks, and orchestrate workflows.
               </Text>
             </div>
             
-            {/* 快捷操作按钮 */}
+            {/* Quick action shortcuts */}
             <div style={{ marginTop: 16 }}>
               <Space direction="vertical" size="small">
                 <Button
@@ -155,28 +155,28 @@ const ChatPanel: React.FC = () => {
                   type="link"
                   onClick={() => handleQuickAction('create_plan')}
                 >
-                  📋 创建新计划
+                  📋 Create a new plan
                 </Button>
                 <Button
                   size="small"
                   type="link"
                   onClick={() => handleQuickAction('list_tasks')}
                 >
-                  📝 查看任务列表
+                  📝 View task list
                 </Button>
                 <Button
                   size="small"
                   type="link"
                   onClick={() => handleQuickAction('system_status')}
                 >
-                  📊 系统状态
+                  📊 System status
                 </Button>
                 <Button
                   size="small"
                   type="link"
                   onClick={() => handleQuickAction('help')}
                 >
-                  ❓ 帮助
+                  ❓ Help
                 </Button>
               </Space>
             </div>
@@ -187,7 +187,7 @@ const ChatPanel: React.FC = () => {
               <ChatMessage key={message.id} message={message} />
             ))}
             
-            {/* 正在处理指示器 */}
+            {/* Processing indicator */}
             {isProcessing && (
               <div className="message assistant">
                 <div className="message-avatar assistant">
@@ -195,7 +195,7 @@ const ChatPanel: React.FC = () => {
                 </div>
                 <div className="message-content">
                   <div className="message-bubble">
-                    <Text>正在思考中...</Text>
+                    <Text>Thinking...</Text>
                   </div>
                 </div>
               </div>
@@ -206,17 +206,17 @@ const ChatPanel: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 上下文信息 */}
+      {/* Context banner */}
       {currentPlan && (
         <>
           <Divider style={{ margin: '8px 0' }} />
           <div style={{ padding: '0 16px 8px', fontSize: 12, color: '#666' }}>
-            当前计划: {currentPlan}
+            Current plan: {currentPlan}
           </div>
         </>
       )}
 
-      {/* 输入区域 */}
+      {/* Composer */}
       <div className="chat-input-area">
         <div className="chat-input-main">
           <TextArea
@@ -224,7 +224,7 @@ const ChatPanel: React.FC = () => {
             value={inputText}
             onChange={handleInputChange}
             onKeyPress={handleKeyPress}
-            placeholder="输入消息... (Shift+Enter换行，Enter发送)"
+            placeholder="Type a message... (Shift+Enter for newline, Enter to send)"
             autoSize={{ minRows: 1, maxRows: 4 }}
             disabled={isProcessing}
             style={{ flex: 1 }}
@@ -233,7 +233,7 @@ const ChatPanel: React.FC = () => {
             <Select
               size="small"
               value={providerValue}
-              placeholder="选择网络搜索来源"
+              placeholder="Choose a web search provider"
               options={providerOptions}
               allowClear
               onChange={handleProviderChange}
@@ -254,7 +254,7 @@ const ChatPanel: React.FC = () => {
 
         <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
           <Space size="small">
-            <Tooltip title="附件">
+            <Tooltip title="Attachment">
               <Button 
                 type="text" 
                 size="small" 
@@ -265,7 +265,7 @@ const ChatPanel: React.FC = () => {
           </Space>
 
           <Space size="small">
-            <Tooltip title="重试">
+            <Tooltip title="Retry">
               <Button
                 type="text"
                 size="small"

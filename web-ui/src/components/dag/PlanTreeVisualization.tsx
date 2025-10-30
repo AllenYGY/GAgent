@@ -46,7 +46,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   }, [selectedTaskId]);
 
-  // 状态图标
+  // Status icon
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
@@ -62,7 +62,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   };
 
-  // 类型图标
+  // Task-type icon
   const getTypeIcon = (taskType?: string) => {
     if (!taskType) return '📄';
     switch (taskType.toLowerCase()) {
@@ -77,7 +77,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   };
 
-  // 状态颜色
+  // Status colour
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -93,7 +93,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   };
 
-  // 构建树形结构
+  // Build nested tree structure
   const buildTree = useMemo((): TreeNode[] => {
     if (!tasks || tasks.length === 0) return [];
 
@@ -113,7 +113,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     return roots.map(root => buildNode(root));
   }, [tasks]);
 
-  // 切换折叠
+  // Toggle collapse state
   const toggleCollapse = (taskId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setCollapsed(prev => {
@@ -127,7 +127,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     });
   };
 
-  // 选择任务
+  // Select a task
   const handleSelectTask = (task: PlanTaskNode) => {
     if (selectedTaskId === undefined) {
       setInternalSelectedId(task.id);
@@ -135,7 +135,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     onSelectTask?.(task);
   };
 
-  // 渲染树节点
+  // Render tree nodes recursively
   const renderTreeNode = (
     node: TreeNode,
     isLast: boolean,
@@ -171,7 +171,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
           )}
           
           <Tooltip 
-            title={`ID: ${task.id} | 状态: ${task.status} | 类型: ${task.task_type}`}
+            title={`ID: ${task.id} | Status: ${task.status} | Type: ${task.task_type}`}
             placement="right"
           >
             <span className="plan-tree-node-info">
@@ -209,7 +209,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height }}>
-        <Spin tip="加载任务中..." />
+        <Spin tip="Loading tasks..." />
       </div>
     );
   }
@@ -226,7 +226,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
         fontSize: '12px'
       }}>
         <div style={{ fontSize: '32px', marginBottom: '8px' }}>🌳</div>
-        <div>暂无任务</div>
+        <div>No tasks yet</div>
       </div>
     );
   }
