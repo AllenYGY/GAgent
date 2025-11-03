@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Card, Spin, Button, Space, Select, Input, message, Badge, Tooltip } from 'antd';
-import { ReloadOutlined, ExpandOutlined, CompressOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ExpandOutlined, CompressOutlined, DownloadOutlined } from '@ant-design/icons';
 import { planTreeApi } from '@api/planTree';
 import { planTreeToTasks } from '@utils/planTree';
+import { exportPlanAsJson } from '@utils/exportPlan';
 import type { PlanSyncEventDetail, Task as TaskType } from '@/types';
 import { useChatStore } from '@store/chat';
 import { useTasksStore } from '@store/tasks';
@@ -39,8 +40,10 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [stats, setStats] = useState<any>(null);
+  const [exporting, setExporting] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const currentPlanId = useChatStore((state) => state.currentPlanId);
+  const currentPlanTitle = useChatStore((state) => state.currentPlanTitle);
   const { setTasks: updateStoreTasks, setTaskStats } = useTasksStore((state) => ({
     setTasks: state.setTasks,
     setTaskStats: state.setTaskStats,
@@ -104,7 +107,7 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
   const loadTasks = useCallback(async () => {
     try {
       setLoading(true);
-      console.log('🔄 Loading tasks for Tree visualization...');
+      console.log('🔄 Loading tasks for tree visualization...');
 
       if (!currentPlanId) {
         console.warn('⚠️ No plan bound; skipping task load.');
@@ -309,6 +312,39 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     loadTasks();
   };
 
+  const handleExportPlan = async () => {
+    if (!currentPlanId) {
+      message.warning('当前没有绑定计划，无法导出。');
+      return;
+    }
+    setExporting(true);
+    try {
+      const tree = await planTreeApi.getPlanTree(currentPlanId);
+      const content = JSON.stringify(tree, null, 2);
+      const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      const planTitle = tree?.title || currentPlanTitle || `plan_${currentPlanId}`;
+      const safeTitle =
+        planTitle.replace(/[\\s/:*?"<>|]+/g, '_').slice(0, 60) || `plan_${currentPlanId}`;
+      const timestamp = new Date().toISOString().replace(/[:]/g, '-');
+      const fileName = `${safeTitle}_${currentPlanId}_${timestamp}.json`;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      message.success('计划导出成功。');
+    } catch (error: any) {
+      console.error('导出计划失败:', error);
+      message.error(error?.message || '导出计划失败，请稍后重试。');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleExpandAll = () => {
     setCollapsed(new Set());
   };
@@ -319,6 +355,60 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
   };
 
   const treeData = buildTree();
+
+  const extraControls = (
+    <Space wrap>
+      <Input.Search
+        placeholder="搜索任务"
+        style={{ width: 200 }}
+        value={searchText}
+        onChange={(e) => setSearchText(e.target.value)}
+        allowClear
+      />
+      <Select
+        placeholder="状态筛选"
+        style={{ width: 120 }}
+        value={statusFilter}
+        onChange={setStatusFilter}
+        options={[
+          { label: '全部', value: 'all' },
+          { label: '待执行', value: 'pending' },
+          { label: '执行中', value: 'running' },
+          { label: '已完成', value: 'completed' },
+          { label: '失败', value: 'failed' },
+        ]}
+      />
+      <Button
+        icon={<ExpandOutlined />}
+        onClick={handleExpandAll}
+        title="展开全部"
+        size="small"
+      />
+      <Button
+        icon={<CompressOutlined />}
+        onClick={handleCollapseAll}
+        title="折叠全部"
+        size="small"
+      />
+      <Tooltip title="导出计划为 JSON 文件">
+        <Button
+          icon={<DownloadOutlined />}
+          onClick={handleExportPlan}
+          loading={exporting}
+          disabled={!currentPlanId}
+        >
+          导出
+        </Button>
+      </Tooltip>
+      <Button
+        icon={<ReloadOutlined />}
+        onClick={handleRefresh}
+        loading={loading}
+      >
+        刷新
+      </Button>
+    </Space>
+  );
 
   return (
     <Card 
@@ -376,6 +466,19 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
       }
     >
       <Spin spinning={loading} tip="Loading tasks...">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <Tooltip title={currentPlanId ? 'Export the current plan as a JSON file' : 'Select a plan before exporting'}>
+            <Button
+              type="default"
+              icon={<DownloadOutlined />}
+              onClick={handleExportPlan}
+              disabled={!currentPlanId}
+              loading={exporting}
+            >
+              Export Plan
+            </Button>
+          </Tooltip>
+        </div>
         <div className="tree-visualization-container">
           {treeData.length > 0 ? (
             <div className="tree-content">

@@ -60,10 +60,14 @@ class EvaluationOrchestrator:
         base_prompt = self.base_executor.fetch_prompt(task_id, default_prompt)
 
         # Build contextual prompt if requested
-        prompt = self.prompt_builder.build_context_prompt(task_id, name, base_prompt, use_context, context_options)
+        prompt = self.prompt_builder.build_context_prompt(
+            task_id, name, base_prompt, use_context, context_options
+        )
 
         # Execute iterative improvement loop
-        result = self._execute_iterative_loop(task_id, name, prompt, task_context, evaluator, config)
+        result = self._execute_iterative_loop(
+            task_id, name, prompt, task_context, evaluator, config
+        )
 
         # Store final results
         if result.status == "done" and result.content:
@@ -93,26 +97,39 @@ class EvaluationOrchestrator:
 
         for iteration in range(config.max_iterations):
             try:
-                logger.info(f"Task {task_id} iteration {iteration + 1}/{config.max_iterations}")
+                logger.info(
+                    f"Task {task_id} iteration {iteration + 1}/{config.max_iterations}"
+                )
 
                 # Generate content
                 content = self.base_executor.execute_llm_chat(current_prompt)
 
                 # Evaluate content
-                evaluation = evaluator.evaluate_content(content=content, task_context=task_context, iteration=iteration)
+                evaluation = evaluator.evaluate_content(
+                    content=content, task_context=task_context, iteration=iteration
+                )
 
                 # Store evaluation history
                 self._store_evaluation_history(task_id, iteration, content, evaluation)
 
                 # Check if quality threshold is met
                 if evaluation.overall_score >= config.quality_threshold:
-                    logger.info(f"Task {task_id} reached quality threshold: {evaluation.overall_score:.3f}")
+                    logger.info(
+                        f"Task {task_id} reached quality threshold: {evaluation.overall_score:.3f}"
+                    )
                     return TaskExecutionResult(
-                        task_id=task_id, status="done", content=content, evaluation=evaluation, iterations=iteration + 1
+                        task_id=task_id,
+                        status="done",
+                        content=content,
+                        evaluation=evaluation,
+                        iterations=iteration + 1,
                     )
 
                 # Update best result if this is better
-                if best_evaluation is None or evaluation.overall_score > best_evaluation.overall_score:
+                if (
+                    best_evaluation is None
+                    or evaluation.overall_score > best_evaluation.overall_score
+                ):
                     best_content = content
                     best_evaluation = evaluation
 
@@ -123,7 +140,9 @@ class EvaluationOrchestrator:
                     )
 
             except Exception as e:
-                logger.error(f"Iteration {iteration + 1} failed for task {task_id}: {e}")
+                logger.error(
+                    f"Iteration {iteration + 1} failed for task {task_id}: {e}"
+                )
                 continue
 
         # Return best result if no iteration met the threshold
@@ -166,7 +185,9 @@ class EvaluationOrchestrator:
         except Exception as e:
             logger.warning(f"Failed to store evaluation config for task {task_id}: {e}")
 
-    def _store_evaluation_history(self, task_id: int, iteration: int, content: str, evaluation: EvaluationResult):
+    def _store_evaluation_history(
+        self, task_id: int, iteration: int, content: str, evaluation: EvaluationResult
+    ):
         """Store evaluation history for debugging and analysis."""
         try:
             self.repo.store_evaluation_history(
@@ -174,10 +195,14 @@ class EvaluationOrchestrator:
                 iteration=iteration,
                 content=content,
                 overall_score=evaluation.overall_score,
-                dimension_scores=evaluation.dimensions.__dict__ if evaluation.dimensions else {},
+                dimension_scores=evaluation.dimensions.__dict__
+                if evaluation.dimensions
+                else {},
                 suggestions=evaluation.suggestions,
                 needs_revision=evaluation.needs_revision,
                 metadata=evaluation.metadata or {},
             )
         except Exception as e:
-            logger.warning(f"Failed to store evaluation history for task {task_id}, iteration {iteration}: {e}")
+            logger.warning(
+                f"Failed to store evaluation history for task {task_id}, iteration {iteration}: {e}"
+            )

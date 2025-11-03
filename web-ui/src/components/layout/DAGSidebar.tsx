@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Typography, Button, Space, Badge, Tooltip, Select, Empty } from 'antd';
+import { Card, Typography, Button, Space, Badge, Tooltip, Select, Empty, message } from 'antd';
 import {
   NodeIndexOutlined,
   FullscreenOutlined,
@@ -7,6 +7,7 @@ import {
   ReloadOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { usePlanTasks } from '@hooks/usePlans';
 import PlanTreeVisualization from '@components/dag/PlanTreeVisualization';
@@ -14,6 +15,7 @@ import type { PlanSyncEventDetail, PlanTaskNode } from '@/types';
 import { useTasksStore } from '@store/tasks';
 import { useChatStore } from '@store/chat';
 import { shouldHandlePlanSyncEvent } from '@utils/planSyncEvents';
+import { exportPlanAsJson } from '@utils/exportPlan';
 
 const { Title, Text } = Typography;
 
@@ -38,19 +40,16 @@ const DAGSidebar: React.FC = () => {
   const [selectedPlanTitle, setSelectedPlanTitle] = useState<string | undefined>(
     currentPlanTitle ?? undefined
   );
+  const [isExportingPlan, setIsExportingPlan] = useState(false);
+  const activePlanId = currentPlanId ?? currentSession?.plan_id ?? null;
+  const activePlanTitle = selectedPlanTitle ?? currentPlanTitle ?? currentSession?.plan_title ?? null;
 
-  // Stabilise session_id to avoid loops
-  const sessionId = currentSession?.session_id;
-  
   const {
     data: planTasks = [],
     isFetching: planTasksLoading,
     refetch: refetchTasks,
   } = usePlanTasks({ planId: currentPlanId ?? undefined });
 
-  // (Removed incorrect useCallback wrapper)
-
-  // Listen for global task updates to refresh the DAG view
   useEffect(() => {
     const handleTasksUpdated = (event: CustomEvent<PlanSyncEventDetail>) => {
       const detail = event.detail;
@@ -138,6 +137,23 @@ const DAGSidebar: React.FC = () => {
     refetchTasks();
   };
 
+  const handleExportPlan = async () => {
+    if (!activePlanId) {
+      message.warning('No plan is currently selected; unable to export.');
+      return;
+    }
+
+    setIsExportingPlan(true);
+    try {
+      const fileName = await exportPlanAsJson(activePlanId, activePlanTitle);
+      message.success(`Plan exported as ${fileName}.`);
+    } catch (error: any) {
+      message.error(error?.message || 'Failed to export plan. Please try again later.');
+    } finally {
+      setIsExportingPlan(false);
+    }
+  };
+
   return (
     <div style={{ 
       height: '100%', 
@@ -145,7 +161,6 @@ const DAGSidebar: React.FC = () => {
       flexDirection: 'column',
       background: 'white',
     }}>
-      {/* Header */}
       <div style={{ 
         padding: '16px',
         borderBottom: '1px solid #f0f0f0',
@@ -156,7 +171,7 @@ const DAGSidebar: React.FC = () => {
             <NodeIndexOutlined style={{ color: '#1890ff', fontSize: 18 }} />
             <Title level={5} style={{ margin: 0 }}>
               Task graph
-          </Title>
+            </Title>
           </div>
           
           <Space size={4}>
@@ -169,7 +184,7 @@ const DAGSidebar: React.FC = () => {
               />
             </Tooltip>
             
-            <Tooltip title="View fullscreen">
+            <Tooltip title="View in fullscreen">
               <Button
                 type="text"
                 size="small"
@@ -187,10 +202,9 @@ const DAGSidebar: React.FC = () => {
           </Space>
         </div>
 
-        {/* Statistics */}
         <Space size={16} wrap>
           <Badge count={stats.total} size="small" offset={[8, -2]}>
-            <Text type="secondary" style={{ fontSize: 12 }}>Total tasks</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Total</Text>
           </Badge>
           <Badge count={stats.running} size="small" color="blue" offset={[8, -2]}>
             <Text type="secondary" style={{ fontSize: 12 }}>Running</Text>
@@ -220,12 +234,11 @@ const DAGSidebar: React.FC = () => {
             {selectedPlanTitle || 'No ROOT task yet'}
           </div>
           <Text type="secondary" style={{ fontSize: 10, color: '#999' }}>
-            💡 Each conversation anchors a ROOT task; all subtasks expand from here.
+            💡 Each conversation anchors a ROOT task from which subtasks expand.
           </Text>
         </Space>
       </div>
 
-      {/* DAG visualisation */}
       {dagVisible && (
         <div style={{ 
           flex: 1,
@@ -236,6 +249,8 @@ const DAGSidebar: React.FC = () => {
             <PlanTreeVisualization
               tasks={planTasks}
               loading={planTasksLoading}
+              planId={activePlanId}
+              planTitle={activePlanTitle}
               onSelectTask={(task) => {
                 if (task) {
                   openTaskDrawer(task);
@@ -263,29 +278,39 @@ const DAGSidebar: React.FC = () => {
                 planTasksLoading
                   ? 'Loading tasks...'
                   : (currentWorkflowId || currentSession?.session_id)
-                    ? 'No tasks yet for this conversation.'
-                    : 'Start a conversation or create a workflow to see tasks.'
+                    ? 'No tasks for this session yet'
+                    : 'Start a conversation or create a workflow first'
               }
             />
           )}
         </div>
       )}
 
-      {/* Footer actions */}
       <div style={{ 
         padding: '12px 16px',
         borderTop: '1px solid #f0f0f0',
         background: '#fafafa',
       }}>
         <Space size={8} wrap style={{ width: '100%', justifyContent: 'center' }}>
-          <Button 
-            size="small" 
+          <Button
+            size="small"
             icon={<ReloadOutlined />}
             onClick={handleRefresh}
             loading={planTasksLoading}
           >
             Refresh
           </Button>
+          <Tooltip title={activePlanId ? 'Export the current plan as a JSON file' : 'Select a plan before exporting'}>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={handleExportPlan}
+              disabled={!activePlanId}
+              loading={isExportingPlan}
+            >
+              Export plan
+            </Button>
+          </Tooltip>
           <Button size="small" icon={<FullscreenOutlined />}>
             Fullscreen
           </Button>
@@ -302,3 +327,4 @@ const DAGSidebar: React.FC = () => {
 };
 
 export default DAGSidebar;
+

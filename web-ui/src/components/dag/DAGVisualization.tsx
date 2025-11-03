@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
-import { Card, Spin, Button, Space, Select, Input, message, Badge } from 'antd';
-import { ReloadOutlined, ExpandOutlined } from '@ant-design/icons';
+import { Card, Spin, Button, Space, Select, Input, message, Badge, Tooltip } from 'antd';
+import { ReloadOutlined, ExpandOutlined, DownloadOutlined } from '@ant-design/icons';
 import { planTreeApi } from '@api/planTree';
 import { planTreeToTasks } from '@utils/planTree';
 import type { PlanSyncEventDetail, Task as TaskType } from '@/types';
 import { useChatStore } from '@store/chat';
 import { useTasksStore } from '@store/tasks';
 import { shouldHandlePlanSyncEvent } from '@utils/planSyncEvents';
+import { exportPlanAsJson } from '@utils/exportPlan';
 
 interface DAGVisualizationProps {
   onNodeClick?: (taskId: number, taskData: any) => void;
@@ -29,7 +30,11 @@ const DAGVisualization: React.FC<DAGVisualizationProps> = ({
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [stats, setStats] = useState<any>(null);
-  const currentPlanId = useChatStore((state) => state.currentPlanId);
+  const [exporting, setExporting] = useState(false);
+  const { currentPlanId, currentPlanTitle } = useChatStore((state) => ({
+    currentPlanId: state.currentPlanId,
+    currentPlanTitle: state.currentPlanTitle,
+  }));
   const { setTasks: updateStoreTasks, setTaskStats } = useTasksStore((state) => ({
     setTasks: state.setTasks,
     setTaskStats: state.setTaskStats,
@@ -449,6 +454,23 @@ const DAGVisualization: React.FC<DAGVisualizationProps> = ({
     networkInstance.current?.fit();
   };
 
+  const handleExportPlan = async () => {
+    if (!currentPlanId) {
+      message.warning('No plan is currently selected; unable to export.');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const fileName = await exportPlanAsJson(currentPlanId, currentPlanTitle);
+      message.success(`Plan exported as ${fileName}.`);
+    } catch (error: any) {
+      message.error(error?.message || 'Failed to export plan. Please try again later.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Agent工作流程图例组件
   const AgentLegend = () => (
     <div style={{ 
@@ -520,6 +542,16 @@ const DAGVisualization: React.FC<DAGVisualizationProps> = ({
             onClick={handleFitView}
             title="适应视图"
           />
+          <Tooltip title={currentPlanId ? 'Export the current plan as a JSON file' : 'Select a plan before exporting'}>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={handleExportPlan}
+              disabled={!currentPlanId}
+              loading={exporting}
+            >
+              Export plan
+            </Button>
+          </Tooltip>
           <Button 
             icon={<ReloadOutlined />} 
             onClick={handleRefresh}

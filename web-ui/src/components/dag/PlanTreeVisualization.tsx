@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Spin, Tooltip } from 'antd';
+import { Spin, Tooltip, Button, Space, message } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import { PlanTaskNode } from '@/types';
+import { exportPlanAsJson } from '@utils/exportPlan';
 import './PlanTreeVisualization.css';
 
 export interface PlanTreeVisualizationProps {
@@ -9,6 +11,8 @@ export interface PlanTreeVisualizationProps {
   height?: number | string;
   onSelectTask?: (task: PlanTaskNode | null) => void;
   selectedTaskId?: number | null;
+  planId?: number | null;
+  planTitle?: string | null;
 }
 
 interface TreeNode {
@@ -33,9 +37,12 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
   height = '480px',
   onSelectTask,
   selectedTaskId,
+  planId,
+  planTitle,
 }) => {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [internalSelectedId, setInternalSelectedId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const effectiveSelectedId =
     selectedTaskId !== undefined ? selectedTaskId ?? null : internalSelectedId;
