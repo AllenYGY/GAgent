@@ -46,7 +46,6 @@ const ChatPanel: React.FC = () => {
     currentRun: simulationRun,
     error: simulationError,
     pollingRunId,
-    transcript: simulationTranscript,
     lastUpdatedAt,
     setEnabled: setSimulationEnabled,
     cancelRun: cancelSimulationRun,
@@ -57,14 +56,13 @@ const ChatPanel: React.FC = () => {
     currentRun: state.currentRun,
     error: state.error,
     pollingRunId: state.pollingRunId,
-    transcript: state.transcript,
     lastUpdatedAt: state.lastUpdatedAt,
     setEnabled: state.setEnabled,
     cancelRun: state.cancelRun,
     refreshRun: state.refreshRun,
   }));
-  const hasSimulationTranscript = simulationTranscript.length > 0;
-  const showSimulationView = simulatedModeEnabled || hasSimulationTranscript;
+  const hasSimulationMessages = messages.some((msg) => Boolean(msg.metadata?.simulation));
+  const showSimulationView = simulatedModeEnabled || hasSimulationMessages;
   const displayedMessages = messages;
   const simulationInProgress = showSimulationView && (simulationLoading || Boolean(pollingRunId));
 

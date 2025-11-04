@@ -211,3 +211,60 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 - Do we need explicit judge scoring categories (precision/recall) beyond alignment text? (collect feedback during pairing.)
 - Should simulations auto-create dedicated chat sessions or reuse the current one? (initial assumption: reuse current session plan binding; validate with product.)
 - Explore analytics hooks once the workflow stabilizes.
+
+## Unified Conversation Persistence (Planned 2024-07-18)
+
+### Objectives
+- Store simulated user ↔ chat agent dialogue exactly like a human conversation so that transcripts, exports, websockets, and analytics all reuse the existing chat infrastructure.
+- Guarantee every simulated turn executes real actions (`StructuredChatAgent.handle`) and leaves a durable audit trail (chat history, plan changes, run metadata) without parallel storage paths.
+- Simplify the frontend: a single chat feed renders both normal and simulated turns, distinguished only by metadata/visual tags.
+
+### Backend Changes
+1. **Conversation persistence**
+   - Extend `SimulationOrchestrator.run_turn` to call a new helper (`record_simulated_exchange`) that reuses `ChatService.create_message` (the same service used by `/chat/message`).
+   - Persist two chat records per turn inside the active session:
+     - Simulated user message (`role='user'`, `content=output.message`, `metadata.simulation=true`, `simulation_role='simulated_user'`, `simulation_run_id`, `simulation_turn_index`).
+     - Chat agent reply (`role='assistant'`, `content=result.reply`, metadata includes `actions_summary`, `raw_response`, judge verdict when available).
+   - Store returned `message_id`s on the `SimulatedTurn` model (`simulated_user_message_id`, `chat_agent_message_id`) for quick lookup when fetching a run.
+2. **Execution contract**
+   - Continue invoking `StructuredChatAgent.handle` to execute actions immediately. After persistence, refresh the plan session so subsequent turns see updated state.
+   - Record action outcomes inside both the run state and assistant message metadata (mirroring existing behaviour for human conversations).
+3. **API updates**
+   - Update `/simulation/run` & `/simulation/run/{id}` responses to include the stored chat message IDs.
+   - Add a convenience endpoint `/simulation/run/{id}/messages` that simply proxies the existing chat history filtered by `simulation_run_id` (optional but useful for debugging).
+4. **Websocket / events**
+   - Because messages flow through the standard `chat.message` creation pipeline, they automatically broadcast via the existing websocket channels—no extra work required.
+5. **Data retention & export**
+   - Keep JSON/TXT persistence as-is, but enrich the export with the chat message IDs so analysts can correlate disk dumps with the canonical conversation.
+   - No new database tables; everything lives in `chat_messages`. Ensure migration doc mentions no schema impact.
+
+### Frontend Changes
+1. **Store simplification**
+   - Remove the dedicated `simulationTranscript` array. `useChatStore.messages` becomes the single source of truth; simulated messages remain in history until the user clears the session.
+   - Replace `mergeSimulationTranscript` with a lightweight badge decorator that marks `metadata.simulation` messages and optionally groups them by run.
+2. **Chat panel UX**
+   - Keep the simulation banner (status, remaining turns, last update).
+   - Highlight simulated messages using existing `ChatMessage` metadata tags (e.g., add a subtle “Simulated user” / “Simulated assistant” label).
+   - Rely on normal chat polling/websocket updates; no extra polling hook needed once the backend persists messages.
+3. **Sidebar controls**
+   - Start/Stop/Refresh buttons continue to call the simulation API.
+   - Add a quick “Scroll to latest simulation” action that jumps the chat feed to the newest message tagged with the active run ID.
+4. **Download/export**
+   - Keep the transcript download button (TXT/JSON). Because chats are now stored centrally, the standard chat export (if available) already includes the same content.
+
+### Testing & QA
+- **Backend**
+  - Unit test `record_simulated_exchange` to ensure two chat messages are created with correct metadata and linked to the run.
+  - Integration test: start a run with an auto-advance turn, assert plan mutations applied, chat history contains the messages, and run payload exposes their IDs.
+- **Frontend**
+  - Jest test verifying the chat store correctly merges websocket-delivered simulation messages and that `ChatMessage` renders simulation badges.
+  - Cypress/manual: trigger a simulation, watch the chat stream to verify real-time updates, confirm action tags and judge verdicts render.
+- **Manual checklist**
+  - Run with auto/step modes, verify chat UI mirrors the conversation.
+  - Download transcript, cross-check with chat export and persisted JSON/TXT.
+  - Clear session history, ensure simulated messages disappear alongside human ones.
+
+### Rollout Considerations
+- Feature flag remains (`ENV.features.simulatedUserMode`).
+- Document in README how simulated conversations are stored and how to retrieve them (API + filesystem path).
+- Coordinate with analytics team—simulation data now flows into any dashboards built atop `chat_messages`.

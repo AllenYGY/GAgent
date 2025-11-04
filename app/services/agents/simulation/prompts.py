@@ -31,6 +31,7 @@ def build_simulated_user_prompt(
     plan_outline: str,
     improvement_goal: Optional[str],
     previous_turns: Iterable[SimulatedTurn],
+    action_catalog: str,
 ) -> str:
     """Compose the prompt used to simulate the next user utterance."""
     turns_text = []
@@ -54,6 +55,9 @@ You are simulating a human user collaborating with a planning assistant.
 
 Plan outline:
 {plan_outline}
+
+Action catalog (must use these ACTION kinds/names):
+{action_catalog}
 
 Current improvement goal:
 {goal_text}

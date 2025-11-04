@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -709,7 +709,7 @@ def cleanup_action_logs(
     with plan_db_connection(db_path) as conn:
         _ensure_action_log_tables(conn, plan_id=plan_id)
         if older_than_days is not None and older_than_days > 0:
-            cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             conn.execute(
                 "DELETE FROM plan_action_logs WHERE created_at < ?",
                 (cutoff.isoformat(),),

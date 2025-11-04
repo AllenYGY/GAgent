@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -45,6 +46,16 @@ def _serialize_state(state: SimulationRunState) -> Dict[str, Any]:
     payload = state.model_dump()
     payload["remaining_turns"] = state.remaining_turns
     return payload
+
+
+def _safe_load_metadata(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:  # pragma: no cover - defensive
+        logger.debug("Failed to decode simulation message metadata: %s", raw)
+        return None
 
 
 @router.post("/run")
@@ -123,6 +134,58 @@ async def cancel_simulation(run_id: str) -> Dict[str, Any]:
     if state is None:
         raise HTTPException(status_code=404, detail="Simulation run not found")
     return {"run": _serialize_state(state)}
+
+
+@router.get("/run/{run_id}/messages")
+async def get_simulation_messages(run_id: str, limit: int = 200) -> Dict[str, Any]:
+    state = await simulation_registry.get_run(run_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Simulation run not found")
+    session_id = state.config.session_id
+    if not session_id:
+        return {"messages": []}
+    try:
+        from app.database import get_db  # lazy import
+
+        pattern = f'%\"simulation_run_id\": \"{run_id}\"%'
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, role, content, metadata, created_at
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND metadata LIKE ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (session_id, pattern, max(1, min(limit, 500))),
+            )
+            rows = cursor.fetchall()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "Failed to load simulation messages for run %s: %s", run_id, exc
+        )
+        return {"messages": []}
+
+    messages: List[Dict[str, Any]] = []
+    for row in rows:
+        # sqlite3.Row supports both mapping and sequence access
+        message_id = row["id"] if isinstance(row, dict) else row[0]
+        role = row["role"] if isinstance(row, dict) else row[1]
+        content = row["content"] if isinstance(row, dict) else row[2]
+        metadata_raw = row["metadata"] if isinstance(row, dict) else row[3]
+        created_at = row["created_at"] if isinstance(row, dict) else row[4]
+        messages.append(
+            {
+                "id": message_id,
+                "role": role,
+                "content": content,
+                "metadata": _safe_load_metadata(metadata_raw),
+                "created_at": created_at,
+            }
+        )
+    return {"messages": messages}
 
 
 register_router(

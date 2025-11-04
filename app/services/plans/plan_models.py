@@ -81,17 +81,24 @@ class PlanTree(BaseModel):
             adjacency.setdefault(node.parent_id, []).append(node.id)
         self.adjacency = adjacency
 
-    def to_outline(self, max_depth: int = 3, max_nodes: int = 40) -> str:
-        """Render the plan as a compact outline for prompts."""
+    def to_outline(
+        self,
+        max_depth: Optional[int] = None,
+        max_nodes: Optional[int] = None,
+    ) -> str:
+        """Render the plan outline, optionally constrained by depth/node limits."""
 
         def _render(node_id: int, depth: int, lines: List[str], counter: List[int]) -> None:
-            if depth > max_depth or counter[0] >= max_nodes:
+            if max_depth is not None and depth > max_depth:
+                return
+            if max_nodes is not None and counter[0] >= max_nodes:
                 return
             node = self.nodes[node_id]
             indent = "  " * depth
-            instruction = node.instruction.strip() if node.instruction else ""
-            snippet = instruction[:90] + ("..." if instruction and len(instruction) > 90 else "")
-            lines.append(f"{indent}- [{node.id}] {node.display_name()}{f' :: {snippet}' if snippet else ''}")
+            instruction = (node.instruction or "").strip()
+            normalized_instruction = " ".join(instruction.split())
+            detail = f" :: {normalized_instruction}" if normalized_instruction else ""
+            lines.append(f"{indent}- [{node.id}] {node.display_name()}{detail}")
             counter[0] += 1
             for child_id in self.children_ids(node_id):
                 _render(child_id, depth + 1, lines, counter)
@@ -105,9 +112,9 @@ class PlanTree(BaseModel):
         counter = [0]
         for root_id in self.root_node_ids():
             _render(root_id, depth=0, lines=lines, counter=counter)
-            if counter[0] >= max_nodes:
+            if max_nodes is not None and counter[0] >= max_nodes:
                 break
-        if counter[0] >= max_nodes:
+        if max_nodes is not None and counter[0] >= max_nodes:
             lines.append(f"... truncated after {counter[0]} nodes ...")
         return "\n".join(lines)
 

@@ -5,6 +5,7 @@ import logging
 from typing import Iterable, Optional
 
 from app.services.llm.llm_service import LLMService, get_llm_service
+from app.services.plans.action_catalog import build_action_catalog
 from app.services.plans.plan_session import PlanSession
 from app.services.foundation.settings import get_settings
 
@@ -31,7 +32,7 @@ class SimulatedUserAgent:
 
     def _plan_outline(self) -> str:
         try:
-            return self.plan_session.outline(max_depth=4, max_nodes=80)
+            return self.plan_session.outline()
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("Failed to produce plan outline: %s", exc)
             return "(plan outline unavailable)"
@@ -43,10 +44,12 @@ class SimulatedUserAgent:
         previous_turns: Iterable[SimulatedTurn],
     ) -> SimulatedUserTurn:
         """Generate the next simulated user message and desired action."""
+        action_catalog = build_action_catalog(self.plan_session.plan_id is not None)
         prompt = build_simulated_user_prompt(
             plan_outline=self._plan_outline(),
             improvement_goal=improvement_goal,
             previous_turns=previous_turns,
+            action_catalog=action_catalog,
         )
         logger.debug("Simulated user prompt:\n%s", prompt)
         response = await self.llm_service.chat_async(prompt, model=self.model)

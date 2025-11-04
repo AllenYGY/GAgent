@@ -5,8 +5,6 @@ import { useChatStore } from '@store/chat';
 import type {
   SimulationRun,
   SimulationRunStatus,
-  SimulationTurn,
-  ChatMessage as ChatMessageType,
 } from '@/types';
 
 interface SimulationState {
@@ -17,7 +15,6 @@ interface SimulationState {
   maxTurns: number;
   autoAdvance: boolean;
   pollingRunId: string | null;
-  transcript: ChatMessageType[];
   lastUpdatedAt: Date | null;
 
   setEnabled: (enabled: boolean) => void;
@@ -42,46 +39,27 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
   const ERROR_TOAST_KEY = 'simulation-refresh-error';
   const TERMINAL_STATUSES: SimulationRunStatus[] = ['finished', 'cancelled', 'error'];
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
-  const safeParseTimestamp = (value: unknown): Date => {
-    if (value instanceof Date) {
-      const copy = new Date(value.getTime());
-      return Number.isNaN(copy.getTime()) ? new Date() : copy;
+  const maybeSyncHistory = async (
+    nextRun: SimulationRun,
+    previousRun: SimulationRun | null,
+    options?: { force?: boolean }
+  ) => {
+    const sessionId = nextRun?.config?.session_id ?? null;
+    if (!sessionId) {
+      return;
     }
-    if (typeof value === 'number') {
-      const dateFromNumber = new Date(value);
-      if (!Number.isNaN(dateFromNumber.getTime())) {
-        return dateFromNumber;
-      }
+    const force = options?.force ?? false;
+    const previousTurns = previousRun?.turns.length ?? 0;
+    const nextTurns = nextRun.turns.length;
+    const statusChanged = previousRun ? previousRun.status !== nextRun.status : false;
+    if (!force && !statusChanged && previousTurns === nextTurns) {
+      return;
     }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) {
-        const parsed = new Date(trimmed);
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed;
-        }
-        const isoNoTzPattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/;
-        if (!trimmed.endsWith('Z') && isoNoTzPattern.test(trimmed)) {
-          const normalized = `${trimmed}Z`;
-          const parsedWithZ = new Date(normalized);
-          if (!Number.isNaN(parsedWithZ.getTime())) {
-            return parsedWithZ;
-          }
-        }
-      }
-    }
-    console.warn('Simulation store: unable to parse timestamp, using current time.', value);
-    return new Date();
-  };
-  const syncTranscript = (runId: string | undefined, transcript: ChatMessageType[]) => {
     try {
-      const chatStore = useChatStore.getState();
-      chatStore.setSimulationTranscript(transcript);
-      chatStore.mergeSimulationTranscript(runId ?? null, transcript);
+      await useChatStore.getState().loadChatHistory(sessionId);
     } catch (error) {
-      console.warn('Failed to sync simulation transcript to chat store:', error);
+      console.warn('Failed to synchronize chat history for simulation run:', error);
     }
-    return transcript;
   };
 
   const stopPollingInternal = () => {
@@ -139,7 +117,6 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     maxTurns: 5,
     autoAdvance: true,
     pollingRunId: null,
-    transcript: [],
     lastUpdatedAt: null,
 
     setEnabled: (enabled: boolean) => {
@@ -148,7 +125,6 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
         error: enabled ? state.error : null,
         currentRun: state.currentRun,
         pollingRunId: enabled ? state.pollingRunId : null,
-        transcript: state.transcript,
       }));
       if (!enabled) {
         stopPolling();
@@ -169,18 +145,21 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
         };
         stopPolling();
         const response = await simulationApi.startRun(mergedPayload);
+        const previousRun = get().currentRun;
+        const nextRun = response.run;
         set({
-          currentRun: response.run,
+          currentRun: nextRun,
           isLoading: false,
           enabled: true,
           error: null,
-          transcript: syncTranscript(response.run.run_id, []),
           lastUpdatedAt: new Date(),
         });
         message.destroy(ERROR_TOAST_KEY);
 
+        await maybeSyncHistory(nextRun, previousRun);
+
         if (response.run?.config?.auto_advance) {
-          startPolling(response.run.run_id);
+          startPolling(nextRun.run_id);
         }
       } catch (error: any) {
         const msg = error?.message || 'Failed to start simulation run.';
@@ -197,26 +176,26 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
       set({ isLoading: true, error: null });
       try {
         const response = await simulationApi.advanceRun(currentRun.run_id, payload);
+        const previousRun = currentRun;
+        const nextRun = response.run;
         set({
-          currentRun: response.run,
+          currentRun: nextRun,
           isLoading: false,
           error: null,
-          transcript: syncTranscript(
-            response.run.run_id,
-            buildTranscript(response.run.turns, response.run.run_id, safeParseTimestamp),
-          ),
           lastUpdatedAt: new Date(),
         });
         message.destroy(ERROR_TOAST_KEY);
 
-        const shouldAuto = response.run.config?.auto_advance || Boolean(payload?.auto_continue);
+        await maybeSyncHistory(nextRun, previousRun);
+
+        const shouldAuto = nextRun.config?.auto_advance || Boolean(payload?.auto_continue);
         if (shouldAuto) {
-          if (TERMINAL_STATUSES.includes(response.run.status)) {
+          if (TERMINAL_STATUSES.includes(nextRun.status)) {
             stopPolling();
           } else {
-            startPolling(response.run.run_id);
+            startPolling(nextRun.run_id);
           }
-        } else if (TERMINAL_STATUSES.includes(response.run.status)) {
+        } else if (TERMINAL_STATUSES.includes(nextRun.status)) {
           stopPolling();
         }
       } catch (error: any) {
@@ -238,16 +217,14 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
       try {
         const response = await simulationApi.getRun(activeRun);
         const run = response.run;
+        const previousRun = get().currentRun;
         set((state) => ({
           currentRun: run,
           isLoading: silent ? state.isLoading : false,
           error: null,
-          transcript: syncTranscript(
-            run.run_id,
-            buildTranscript(run.turns, run.run_id, safeParseTimestamp),
-          ),
           lastUpdatedAt: new Date(),
         }));
+        await maybeSyncHistory(run, previousRun);
         if (TERMINAL_STATUSES.includes(run.status)) {
           stopPollingInternal();
           message.destroy(ERROR_TOAST_KEY);
@@ -274,16 +251,15 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
       set({ isLoading: true, error: null });
       try {
         const response = await simulationApi.cancelRun(currentRun.run_id);
+        const previousRun = currentRun;
+        const nextRun = response.run;
         set({
-          currentRun: response.run,
+          currentRun: nextRun,
           isLoading: false,
           error: null,
-          transcript: syncTranscript(
-            response.run.run_id,
-            buildTranscript(response.run.turns, response.run.run_id, safeParseTimestamp),
-          ),
           lastUpdatedAt: new Date(),
         });
+        await maybeSyncHistory(nextRun, previousRun, { force: true });
         stopPolling();
       } catch (error: any) {
         const msg = error?.message || 'Failed to cancel simulation run.';
@@ -298,7 +274,6 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
         currentRun: null,
         error: null,
         isLoading: false,
-        transcript: syncTranscript(undefined, []),
         lastUpdatedAt: null,
       });
     },
@@ -307,47 +282,3 @@ export const useSimulationStore = create<SimulationState>((set, get) => {
     stopPolling,
   };
 });
-
-function buildTranscript(
-  turns: SimulationTurn[] | undefined,
-  runId: string | undefined,
-  parseTimestamp: (value: unknown) => Date,
-): ChatMessageType[] {
-  if (!turns || !turns.length) {
-    return [];
-  }
-  const items: ChatMessageType[] = [];
-  turns.forEach((turn) => {
-    const timestamp = parseTimestamp(turn.created_at);
-    items.push({
-      id: `sim-user-${runId ?? "run"}-${turn.index}`,
-      type: 'user',
-      content: turn.simulated_user.message,
-      timestamp,
-      metadata: {
-        simulation: true,
-        simulation_run_id: runId,
-        simulation_turn_index: turn.index,
-        simulation_role: 'simulated_user',
-        simulation_goal: turn.goal,
-        simulation_desired_action: turn.simulated_user.desired_action,
-      },
-    });
-    items.push({
-      id: `sim-assistant-${runId ?? "run"}-${turn.index}`,
-      type: 'assistant',
-      content: turn.chat_agent.reply,
-      timestamp,
-      metadata: {
-        simulation: true,
-        simulation_run_id: runId,
-        simulation_turn_index: turn.index,
-        simulation_role: 'chat_agent',
-        simulation_goal: turn.goal,
-        simulation_actions: turn.chat_agent.actions,
-        simulation_judge: turn.judge,
-      },
-    });
-  });
-  return items;
-}

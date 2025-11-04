@@ -230,6 +230,15 @@ def format_run_summary(run: SimulationRunState) -> str:
                     )
                     line += f" {encoded}"
                 lines.append(line)
+        lines.append("")
+        lines.append(
+            "User message ID     : "
+            f"{turn.simulated_user_message_id if turn.simulated_user_message_id is not None else '(not saved)'}"
+        )
+        lines.append(
+            "Assistant message ID: "
+            f"{turn.chat_agent_message_id if turn.chat_agent_message_id is not None else '(not saved)'}"
+        )
         if turn.judge:
             lines.append("")
             lines.append(

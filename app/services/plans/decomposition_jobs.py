@@ -7,7 +7,7 @@ import uuid
 from collections import deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
 
 from ...repository.plan_storage import (
@@ -33,13 +33,16 @@ _job_context: ContextVar[Optional[str]] = ContextVar(
 
 
 def _utc_now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def _to_iso(value: Optional[datetime]) -> Optional[str]:
     if value is None:
         return None
-    return value.replace(microsecond=int(value.microsecond / 1000) * 1000).isoformat() + "Z"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    value = value.astimezone(timezone.utc)
+    return value.replace(microsecond=int(value.microsecond / 1000) * 1000).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_metadata(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:

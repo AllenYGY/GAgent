@@ -67,6 +67,8 @@ class SimulatedTurn(BaseModel):
     judge: Optional[JudgeVerdict] = None
     goal: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
+    simulated_user_message_id: Optional[int] = None
+    chat_agent_message_id: Optional[int] = None
 
 
 class SimulationRunConfig(BaseModel):

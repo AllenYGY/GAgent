@@ -41,7 +41,11 @@ class PlanSession:
             raise RuntimeError("The current session is not bound to a specific plan.")
         return self._plan_tree
 
-    def outline(self, max_depth: int = 3, max_nodes: int = 40) -> str:
+    def outline(
+        self,
+        max_depth: Optional[int] = None,
+        max_nodes: Optional[int] = None,
+    ) -> str:
         """Return a string outline for prompt inclusion."""
         if self.plan_id is None:
             return "(no plan bound)"

@@ -92,3 +92,5 @@ async def test_persisted_run_uses_utc_timestamps(tmp_path, monkeypatch):
         assert turn["created_at"].endswith("Z")
         parsed = datetime.fromisoformat(turn["created_at"].replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
+        assert "simulated_user_message_id" in turn
+        assert "chat_agent_message_id" in turn

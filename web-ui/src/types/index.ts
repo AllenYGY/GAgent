@@ -380,6 +380,8 @@ export interface ChatMessage {
     simulation_desired_action?: SimulationActionSpec | null;
     simulation_actions?: SimulationActionSpec[];
     simulation_judge?: SimulationJudgeVerdict | null;
+    simulation_user_message_id?: number | null;
+    simulation_message_id?: number | null;
     [key: string]: any;
   };
 }
@@ -481,6 +483,8 @@ export interface SimulationTurn {
   chat_agent: SimulationChatTurn;
   judge?: SimulationJudgeVerdict | null;
   created_at: string;
+  simulated_user_message_id?: number | null;
+  chat_agent_message_id?: number | null;
 }
 
 export interface SimulationRun {

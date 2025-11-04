@@ -1085,9 +1085,14 @@ def _set_session_plan_id(session_id: str, plan_id: Optional[int]) -> None:
 
 
 def _save_chat_message(
-    session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None
-) -> None:
-    """Persist chat message."""
+    session_id: str,
+    role: str,
+    content: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
+    """Persist chat message and return the inserted row ID if available."""
+    if not session_id:
+        return None
     try:
         from ..database import get_db  # lazy import to avoid circular deps
 
@@ -1111,6 +1116,7 @@ def _save_chat_message(
                 """,
                 (session_id, role, content, metadata_json),
             )
+            message_id = cursor.lastrowid
             cursor.execute(
                 """
                 UPDATE chat_sessions
@@ -1121,8 +1127,10 @@ def _save_chat_message(
                 (session_id,),
             )
             conn.commit()
+            return int(message_id) if message_id is not None else None
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Failed to save chat message: %s", exc)
+    return None
 
 
 def _load_chat_history(session_id: str, limit: int = 50) -> List[ChatMessage]:
@@ -1763,7 +1771,7 @@ class StructuredChatAgent:
                         self.plan_session.plan_id,
                         job_id=job_id,
                         status="succeeded" if success else "failed",
-                        finished_at=datetime.utcnow(),
+                        finished_at=datetime.now(datetime.UTC),
                         stats={
                             "step_count": len(steps),
                             "success": success,
@@ -1840,23 +1848,9 @@ class StructuredChatAgent:
         )
 
     def _compose_action_catalog(self, plan_bound: bool) -> str:
-        base_actions = [
-            "- system_operation: help",
-            "- tool_operation: web_search (use for live web information; requires `query`, optional provider/max_results)",
-            "- tool_operation: graph_rag (query the phage-host knowledge graph; requires `query`, optional top_k/hops/return_subgraph/focus_entities)",
-        ]
-        if plan_bound:
-            plan_actions = [
-                "- plan_operation: create_plan, list_plans, execute_plan, delete_plan",
-                "- task_operation: create_task, update_task, update_task_instruction, move_task, delete_task, decompose_task, show_tasks, query_status, rerun_task",
-                "- context_request: request_subgraph (request additional task context; this response must not include other actions)",
-            ]
-        else:
-            plan_actions = [
-                "- plan_operation: create_plan  # only when the user explicitly asks to create a plan",
-                "- plan_operation: list_plans  # list candidates; do not execute or mutate tasks while unbound",
-            ]
-        return "\n".join(base_actions + plan_actions)
+        from app.services.plans.action_catalog import build_action_catalog
+
+        return build_action_catalog(plan_bound)
 
     def _compose_guidelines(self, plan_bound: bool) -> str:
         common_rules = [
