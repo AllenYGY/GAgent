@@ -372,6 +372,14 @@ export interface ChatMessage {
     job_id?: string;
     job_status?: string;
     job_logs?: JobLogEvent[];
+    simulation?: boolean;
+    simulation_run_id?: string;
+    simulation_turn_index?: number;
+    simulation_role?: 'simulated_user' | 'chat_agent';
+    simulation_goal?: string | null;
+    simulation_desired_action?: SimulationActionSpec | null;
+    simulation_actions?: SimulationActionSpec[];
+    simulation_judge?: SimulationJudgeVerdict | null;
     [key: string]: any;
   };
 }
@@ -432,6 +440,68 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   error?: string;
+}
+
+// Simulated user mode types
+export type SimulationRunStatus = 'idle' | 'running' | 'finished' | 'cancelled' | 'error';
+
+export interface SimulationActionSpec {
+  kind: string;
+  name: string;
+  parameters?: Record<string, any>;
+  blocking?: boolean;
+  order?: number | null;
+  success?: boolean | null;
+  result_message?: string | null;
+}
+
+export interface SimulationUserTurn {
+  message: string;
+  desired_action?: SimulationActionSpec | null;
+  raw_response?: Record<string, any> | null;
+}
+
+export interface SimulationChatTurn {
+  reply: string;
+  actions: SimulationActionSpec[];
+  raw_response?: Record<string, any> | null;
+}
+
+export interface SimulationJudgeVerdict {
+  alignment: 'aligned' | 'misaligned' | 'unclear';
+  explanation: string;
+  confidence?: number | null;
+  raw_response?: Record<string, any> | null;
+}
+
+export interface SimulationTurn {
+  index: number;
+  goal?: string | null;
+  simulated_user: SimulationUserTurn;
+  chat_agent: SimulationChatTurn;
+  judge?: SimulationJudgeVerdict | null;
+  created_at: string;
+}
+
+export interface SimulationRun {
+  run_id: string;
+  status: SimulationRunStatus;
+  config: {
+    session_id?: string | null;
+    plan_id?: number | null;
+    improvement_goal?: string | null;
+    max_turns: number;
+    auto_advance: boolean;
+  };
+  turns: SimulationTurn[];
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
+  remaining_turns: number;
+}
+
+export interface SimulationRunResponse {
+  run: SimulationRun;
 }
 
 // 系统状态类型

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Avatar, Typography, Space, Button, Tooltip, message as antMessage } from 'antd';
+import { Avatar, Typography, Space, Button, Tooltip, message as antMessage, Tag } from 'antd';
 import {
   UserOutlined,
   RobotOutlined,
@@ -27,6 +27,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const { type, content, timestamp, metadata } = message;
   const { saveMessageAsMemory } = useChatStore();
   const [isSaving, setIsSaving] = useState(false);
+  const isSimulation = metadata?.simulation === true;
 
   // Copy message content
   const handleCopy = () => {
@@ -48,8 +49,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   };
 
   // Format timestamp
-  const formatTime = (date: Date) => {
-    return new Date(date).toLocaleTimeString(undefined, {
+  const formatTime = (value: Date) => {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '--:--';
+    }
+    return date.toLocaleTimeString(undefined, {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -65,7 +70,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     switch (type) {
       case 'user':
         return (
-          <Avatar 
+      <Avatar
             {...avatarProps}
             icon={<UserOutlined />}
             style={{ ...avatarProps.style, backgroundColor: '#1890ff' }}
@@ -73,7 +78,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         );
       case 'assistant':
         return (
-          <Avatar 
+      <Avatar
             {...avatarProps}
             icon={<RobotOutlined />}
             style={{ ...avatarProps.style, backgroundColor: '#52c41a' }}
@@ -81,7 +86,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         );
       case 'system':
         return (
-          <Avatar 
+      <Avatar
             {...avatarProps}
             icon={<InfoCircleOutlined />}
             style={{ ...avatarProps.style, backgroundColor: '#faad14' }}
@@ -171,6 +176,87 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   // Render metadata
   const renderMetadata = () => {
     if (!metadata) return null;
+
+    if (isSimulation) {
+      const roleLabel = metadata.simulation_role === 'chat_agent' ? 'Chat agent' : 'Simulated user';
+      const desiredAction = metadata.simulation_desired_action;
+      const actions = Array.isArray(metadata.simulation_actions) ? metadata.simulation_actions : [];
+      const judge = metadata.simulation_judge;
+
+      return (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text type="secondary">
+              {roleLabel} · turn #{metadata.simulation_turn_index ?? '-'}
+            </Text>
+            {metadata.simulation_goal && (
+              <div>
+                <strong>Goal:</strong> {metadata.simulation_goal}
+              </div>
+            )}
+            {desiredAction && (
+              <div>
+                <strong>Desired ACTION:</strong> {desiredAction.kind}/{desiredAction.name}
+                {desiredAction.parameters && Object.keys(desiredAction.parameters).length > 0 && (
+                  <Text type="secondary" style={{ marginLeft: 8 }}>
+                    {JSON.stringify(desiredAction.parameters)}
+                  </Text>
+                )}
+                {typeof desiredAction.success === 'boolean' && (
+                  <Tag color={desiredAction.success ? 'green' : 'red'} style={{ marginLeft: 8 }}>
+                    {desiredAction.success ? 'SUCCESS' : 'FAILED'}
+                  </Tag>
+                )}
+                {desiredAction.result_message && (
+                  <Text type="secondary" style={{ display: 'block', marginTop: 2 }}>
+                    {desiredAction.result_message}
+                  </Text>
+                )}
+              </div>
+            )}
+            {actions.length > 0 && (
+              <div>
+                <strong>Actions:</strong>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                  {actions.map((action, idx) => (
+                    <li key={`${metadata.simulation_run_id}-${metadata.simulation_turn_index}-action-${idx}`}>
+                      {action.kind}/{action.name}
+                      {action.parameters && Object.keys(action.parameters).length > 0 && (
+                        <Text type="secondary" style={{ marginLeft: 6 }}>
+                          {JSON.stringify(action.parameters)}
+                        </Text>
+                      )}
+                      {typeof action.success === 'boolean' && (
+                        <Tag color={action.success ? 'green' : 'red'} style={{ marginLeft: 6 }}>
+                          {action.success ? 'SUCCESS' : 'FAILED'}
+                        </Tag>
+                      )}
+                      {action.result_message && (
+                        <Text type="secondary" style={{ marginLeft: 6 }}>
+                          {action.result_message}
+                        </Text>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {judge && (
+              <div>
+                <strong>Judge verdict:</strong>{' '}
+                <Tag color={judge.alignment === 'aligned' ? 'green' : judge.alignment === 'misaligned' ? 'red' : 'orange'}>
+                  {judge.alignment.toUpperCase()}
+                </Tag>
+                <Text style={{ display: 'block', marginTop: 2 }}>{judge.explanation}</Text>
+                {typeof judge.confidence === 'number' && (
+                  <Text type="secondary">Confidence: {judge.confidence.toFixed(2)}</Text>
+                )}
+              </div>
+            )}
+          </Space>
+        </div>
+      );
+    }
 
     const planTitle = metadata.plan_title;
     const planId = metadata.plan_id;

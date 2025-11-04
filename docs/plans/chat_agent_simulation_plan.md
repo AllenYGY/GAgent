@@ -1,3 +1,4 @@
+
 # Simulated User & Judge Agent Mode Plan
 
 ## Objectives
@@ -24,7 +25,8 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
   - Use Pydantic models for validation and serialization.
 - `app/services/agents/simulation/prompts.py`
   - Hold template strings (Jinja or f-strings) for simulated user and judge prompts.
-  - Accept placeholders for plan outline, improvement goal, prior turns, and rubric guidance.
+  - Accept placeholders for plan outline, prior turns, and rubric guidance.
+  - Automatically fall back to a default “refine the currently bound plan” goal when none is provided.
   - Export defaults referencing `SIM_USER_MODEL`/`SIM_JUDGE_MODEL` environment overrides (default `qwen3-max`).
 - `app/services/agents/simulation/sim_user_agent.py`
   - Wrap `PlanSession` (`app/services/plans/plan_session.py:12`) to refresh/bind the active plan and render outlines via `PlanTree.to_outline()` (`app/services/plans/plan_models.py:84`).
@@ -43,7 +45,7 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 
 ### FastAPI Endpoints
 - New router `app/routers/simulation_routes.py` registered under `/simulation`.
-  - `POST /simulation/run`: body includes session id, optional plan id/goal/turn budget; returns run id and initial state.
+- `POST /simulation/run`: body includes session id, optional plan id/turn budget (goal auto-inferred); returns run id and initial state.
   - `POST /simulation/{run_id}/advance`: triggers next turn (used for manual, step-by-step control).
   - `POST /simulation/{run_id}/cancel`: stops a run.
   - `GET /simulation/{run_id}`: returns run transcript, verdicts, status (`idle`, `running`, `finished`, `cancelled`, `error`).
@@ -52,6 +54,7 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 
 ### Configuration & Logging
 - Extend `app/config/__init__.py` to expose `SIM_USER_MODEL`, `SIM_JUDGE_MODEL`, `SIM_DEFAULT_TURNS`, `SIM_MAX_TURNS`.
+- Centralize a constant/default (e.g., `SIM_DEFAULT_GOAL`) so backend prompts consistently describe “refine the current plan” when no explicit goal is provided.
 - Log each LLM prompt/response (with truncation) under a dedicated logger namespace for debugging.
 - Add error states to run registry so UI can show friendly error banners.
 
@@ -68,7 +71,7 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 ### State Management
 - New store `web-ui/src/store/simulation.ts` using Zustand (with selector middleware) to track:
   - Mode toggle (`simulatedModeEnabled`), `currentRunId`, transcript data, loading/error states.
-  - Controls for starting runs (selected session plan, improvement goal, max turns).
+  - Controls for starting runs (selected session plan, max turns if needed later; goal defaults internally).
   - Methods to poll backend, advance manually, cancel, and reset state on toggle off.
 - Store integrates with existing chat/task stores to fetch plan metadata and session context.
 
@@ -88,10 +91,58 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 - New component `SimulatedTranscript` within chat folder:
   - Render timeline of turns: simulated user message + desired ACTION (collapsible JSON), chat agent reply + actions, judge verdict explanation.
   - Provide manual “Step” and “Stop” buttons when auto-run is paused.
+  - Display the default goal description (“Improve current plan”) so observers know the simulator’s intent even without user input.
 - DAG Sidebar (`web-ui/src/components/layout/DAGSidebar.tsx`)
-  - Show current plan context, improvement goal input, and run controls so users can manage simulations while inspecting the plan tree.
+  - Show current plan context, explain that the simulator automatically aims to improve the bound plan, and expose run controls while inspecting the plan tree.
 - Provide toast/notification feedback on run completion, alignment success, mismatches, or errors.
 - Ensure strings remain English (per prior UI migration).
+
+### Simulation Run Refresh Reliability (Follow-up)
+- **Centralised transcript state**
+  - Extend `SimulationState` with a persistent `transcript: ChatMessage[]` array generated from `SimulationRun.turns` via a helper (`buildTranscript`).
+  - Ensure `startRun`, `refreshRun`, `advanceRun`, and `cancelRun` all rebuild the transcript so UI always reflects the latest chat.
+  - When toggling simulated mode off (`setEnabled(false)`), freeze `currentRun` and `transcript` instead of clearing them, allowing users to review the most recent simulation without rerunning it.
+  - Add a selector to retrieve `transcript` as well as a derived flag `hasSimulationHistory` used by the chat panel.
+- **Reliable polling loop**
+  - Replace the two one-off `setTimeout` calls with a reusable scheduler that polls `/simulation/run/{id}` every 1–2 seconds while status is `idle`/`running`.
+  - Implement exponential backoff on errors (initial 1.5s, cap at 10s) and surface failures via `message.error` with a persistent key so users know the UI is retrying.
+  - Automatically stop polling once the run hits a terminal state (`finished`, `cancelled`, `error`) or when the user disables simulated mode.
+  - Expose `startPolling(runId)` / `stopPolling()` on the store so sidebar buttons and chat panel can control lifecycle.
+- **Chat panel integration**
+  - `ChatPanel` should always render the transcript when `transcript.length > 0`, even if simulated mode is toggled off later; fall back to regular messages only when there is no simulation history.
+  - Show a breathing indicator (“Running simulation…”) whenever polling or `isLoading` is true so users know more turns may arrive.
+  - Keep scroll-to-bottom keyed on `transcript.length` to auto-scroll when a new turn is added.
+- **Sidebar controls & feedback**
+  - Add/retain a visible status badge (`Auto refreshing`) when polling is active.
+  - Provide a manual “Refresh simulation status” button that calls `refreshRun(run_id)` for cases where auto polling is disabled or paused.
+  - Display a toast when polling stops due to completion or cancellation, including the total number of turns processed.
+- **Local persistence & exportability**
+  - Continue writing full run state to `data/simulation_runs/<run_id>.json`; add a parallel human-readable `.txt` (or extend JSON with `transcript`) summarising each turn (`Sim User -> Chat Agent -> Judge`).
+  - Make the output directory configurable via `SIMULATION_RUN_OUTPUT_DIR` and document it.
+  - Optionally provide an API/CLI helper to download the transcript so users can inspect simulations without digging through the filesystem.
+- **Testing & validation**
+  - Extend backend tests to assert the JSON/TXT dump contains all turns and judge verdicts after auto-run completes.
+  - Add frontend unit tests verifying the store builds transcripts correctly and the chat panel renders them when toggled off/on.
+  - Update manual QA checklist: run an auto-advance simulation, verify transcript grows to expected turn count, toggle mode off and confirm history remains visible, open the persisted JSON/TXT file and ensure contents match UI.
+
+### Chat Agent Action Execution Review & Transparency
+- **Execution contract**
+  - Ensure `SimulationOrchestrator` calls `StructuredChatAgent.handle()` so that Chat Agent ACTIONS are actually executed (plan/task mutations, tool calls, etc.).
+  - Log each executed step with `kind/name/success` and capture any error messages so the execution path is auditable.
+- **Data capture**
+  - Persist execution metadata inside `SimulationRun.turns[].chat_agent.actions[]` (fields: `success`, `result_message`, parameters). Reuse the same structure in the JSON/TXT outputs for offline review.
+  - When `_persist_run` writes the run to disk, include a human-readable `.txt` summary that lists, per turn, the simulated user message, chat agent reply, executed actions, and judge verdict.
+- **Front-end integration**
+  - Maintain a transcript array (list of chat messages) inside the simulation store; rebuild it whenever new turns arrive via polling.
+  - Sync the transcript into the global chat store so the standard `ChatPanel` renders simulated user & chat agent messages alongside normal conversation history.
+  - Highlight executed actions with success/failure tags and execution summaries directly in the chat bubbles for quick inspection.
+  - Keep the transcript visible even after toggling simulated mode off, allowing retroactive audit.
+- **Polling & feedback**
+  - Continue fixed-interval polling with error backoff; while polling is active, show an in-UI indicator (“Running simulation…”) and expose a manual “Refresh” button for forced sync.
+- **Validation & QA**
+  - Backend: write tests that run a simulated turn containing an executable action (e.g., `plan_operation/create_task`), then assert the PlanRepository reflects the change and `actions[0].success` is true in the recorded turn.
+  - Frontend: add unit tests for transcript generation (`buildTranscript`) and snapshot tests verifying the chat message renders action success/error states correctly.
+  - Manual QA: for a real plan, run the simulator, confirm chat actions modify the plan, review logs/toast messages, check the generated JSON/TXT files, and confirm the chat UI displays the same information.
 
 ### Frontend Collaboration
 - Schedule pairing session with frontend engineers to:
@@ -108,7 +159,6 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 ## Prompt Strategy
 - Draft prompts in English with placeholders for:
   - Plan outline (limited depth to avoid prompt bloat).
-  - Desired improvement goal (entered by user in UI).
   - Prior simulated user text and judge verdict summary.
   - Action schema reminder referencing `LLM_ACTIONS.md`.
 - Provide configuration hooks so future iterations can swap rubrics or import alternative templates without code changes.
@@ -125,9 +175,39 @@ Out of scope for this iteration: durable persistence, analytics dashboards, or a
 4. Integrate feature flag, perform manual QA with mock LLM responses, then with real `qwen3-max`.
 5. Document usage in README or developer guide, update onboarding docs, and coordinate enablement per environment.
 
+## Implementation Update (2024-07-16)
+- Simulation registry now persists each run to `data/simulation_runs/` as JSON and TXT summaries; datetime payloads and action metadata are serialized safely.
+- Chat orchestration captures execution outcomes (`success`, `result_message`) for every action step; the orchestrator test suite verifies both judge alignment and action logging.
+- The frontend simulation store rebuilds transcripts on every poll and mirrors them into the main chat store, keeping simulated conversations visible even after toggling the mode.
+- `ChatPanel` surfaces a dedicated simulation banner (status, remaining turns, auto-refresh, manual refresh/stop controls) and renders the simulated user/chat agent exchange inline with judge verdicts.
+- Added regression tests ensuring runtime persistence tolerates datetime-rich payloads and that orchestrator turns retain execution details.
+
+### Follow-up Fixes (Safari timestamp parsing) – 2024-07-17
+- **Backend timestamp normalisation**
+  - Emit all `SimulationRunState.created_at/updated_at` and `SimulatedTurn.created_at` values as timezone-aware UTC strings (e.g. `datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')`) to avoid browser parsing discrepancies.
+  - Ensure `_json_default` and the TXT summary formatter reuse the same helper so persisted transcripts also contain `Z`-suffixed timestamps.
+  - Extend the runtime persistence test to read the generated JSON and assert that every `created_at` parses cleanly via `datetime.fromisoformat(...).tzinfo is not None`.
+
+- **Frontend defensive parsing**
+  - Update `buildTranscript` to run timestamps through a utility `safeParseTimestamp(value)` which:
+    1. Accepts already-valid `Date` objects.
+    2. Adds a trailing `Z` when the backend string lacks timezone info.
+    3. Falls back to `new Date()` (current time) and logs a warning if parsing still fails.
+  - Adjust `ChatMessage.formatTime` to check `Number.isNaN(date.getTime())`; display `'--:--'` instead of throwing when a timestamp is invalid.
+  - Add a small badge or tooltip in the simulation banner showing the timestamp of the last successful poll so users know when data last refreshed.
+
+- **Persistence visibility**
+  - Document the storage directory (`data/simulation_runs/`) in the README and expose it via environment variable `SIMULATION_RUN_OUTPUT_DIR`.
+  - Provide a quick “Download transcript” action in the sidebar that calls a new `/simulation/run/{id}/export` endpoint (or links directly to the TXT file once the endpoint is wired).
+
+- **Testing & QA**
+  - Backend: new unit test covering the timestamp helper and verifying Safari-compatible formatting.
+  - Frontend: Jest test for `safeParseTimestamp` with Safari-problematic input (`YYYY-MM-DDTHH:MM:SS.mmmmmm`) plus a component test ensuring `ChatMessage` renders when timestamp parsing fails.
+  - Manual QA checklist: run a simulation in Safari/WebKit, confirm chat bubbles appear, inspect persisted JSON/TXT for `Z` suffix, verify the “Download transcript” flow.
+- ✅ Implemented: backend timestamps now persist with `Z` suffixes, transcript exports are available via `/simulation/run/{id}/export`, the sidebar offers a “Download transcript” control, and the frontend uses a defensive parser plus graceful time rendering (`--:--`) for invalid timestamps.
+
 ## Open Questions / Follow-ups
 - When to promote from in-memory runs to persisted history? (depends on user feedback.)
 - Do we need explicit judge scoring categories (precision/recall) beyond alignment text? (collect feedback during pairing.)
 - Should simulations auto-create dedicated chat sessions or reuse the current one? (initial assumption: reuse current session plan binding; validate with product.)
 - Explore analytics hooks once the workflow stabilizes.
-

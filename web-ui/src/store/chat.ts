@@ -129,6 +129,7 @@ interface ChatState {
   currentSession: ChatSession | null;
   sessions: ChatSession[];
   messages: ChatMessage[];
+  simulationTranscript: ChatMessage[];
   currentWorkflowId: string | null;
 
   // Current context
@@ -161,6 +162,9 @@ interface ChatState {
   updateMessage: (messageId: string, updates: Partial<ChatMessage>) => void;
   removeMessage: (messageId: string) => void;
   clearMessages: () => void;
+  setSimulationTranscript: (messages: ChatMessage[]) => void;
+  clearSimulationTranscript: () => void;
+  mergeSimulationTranscript: (runId: string | null, messages: ChatMessage[]) => void;
   
   // Input actions
   setInputText: (text: string) => void;
@@ -204,6 +208,7 @@ export const useChatStore = create<ChatState>()(
     currentSession: null,
     sessions: [],
     messages: [],
+    simulationTranscript: [],
     currentWorkflowId: null,
     currentPlanId: null,
     currentPlanTitle: null,
@@ -231,6 +236,7 @@ export const useChatStore = create<ChatState>()(
         currentSession: session,
         currentWorkflowId: session?.workflow_id ?? null,
         messages: session ? session.messages : [],
+        simulationTranscript: [],
         currentPlanId: sessionPlanId,
         currentPlanTitle: sessionPlanTitle,
         currentTaskId: sessionTaskId,
@@ -278,6 +284,7 @@ export const useChatStore = create<ChatState>()(
           sessions: newSessions,
           currentSession: state.currentSession?.id === sessionId ? null : state.currentSession,
           messages: state.currentSession?.id === sessionId ? [] : state.messages,
+          simulationTranscript: state.currentSession?.id === sessionId ? [] : state.simulationTranscript,
           defaultSearchProvider:
             state.currentSession?.id === sessionId ? null : state.defaultSearchProvider,
         };
@@ -351,6 +358,7 @@ export const useChatStore = create<ChatState>()(
             currentTaskName: null,
             currentWorkflowId: null,
             messages: [],
+            simulationTranscript: [],
           });
         }
       }
@@ -420,6 +428,69 @@ export const useChatStore = create<ChatState>()(
 
     // Clear messages
     clearMessages: () => set({ messages: [] }),
+
+    setSimulationTranscript: (messages) =>
+      set(() => ({
+        simulationTranscript: messages,
+      })),
+
+    clearSimulationTranscript: () =>
+      set(() => ({
+        simulationTranscript: [],
+      })),
+
+    mergeSimulationTranscript: (runId, messages) =>
+      set((state) => {
+        const runFilter = runId;
+        const filteredMessages = state.messages.filter((msg) => {
+          const meta = msg.metadata;
+          if (!meta?.simulation) {
+            return true;
+          }
+          if (runFilter === null) {
+            return false;
+          }
+          return meta.simulation_run_id !== runFilter;
+        });
+
+        const merged = runFilter === null
+          ? filteredMessages
+          : [...filteredMessages, ...messages];
+
+        const toMillis = (value: any): number => {
+          if (value instanceof Date) {
+            const time = value.getTime();
+            return Number.isNaN(time) ? 0 : time;
+          }
+          const parsed = new Date(value ?? 0);
+          const time = parsed.getTime();
+          return Number.isNaN(time) ? 0 : time;
+        };
+
+        merged.sort((a, b) => toMillis(a.timestamp) - toMillis(b.timestamp));
+
+        let updatedSession = state.currentSession;
+        if (updatedSession) {
+          updatedSession = {
+            ...updatedSession,
+            messages: merged,
+            updated_at: new Date(),
+          };
+        }
+
+        const currentSessionId = updatedSession?.id ?? null;
+        const updatedSessions = currentSessionId && updatedSession
+          ? state.sessions.map((session) =>
+              session.id === currentSessionId ? updatedSession : session,
+            )
+          : state.sessions;
+
+        return {
+          messages: merged,
+          currentSession: updatedSession,
+          sessions: updatedSessions,
+        };
+      }),
 
     // Set chat context
     setChatContext: ({ planId, planTitle, taskId, taskName }) => {

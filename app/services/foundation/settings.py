@@ -135,6 +135,14 @@ if _USE_PYDANTIC:
         job_log_max_rows: int = Field(
             default=10000, env="JOB_LOG_MAX_ROWS"
         )
+        sim_user_model: str = Field(default="qwen3-max", env="SIM_USER_MODEL")
+        sim_judge_model: str = Field(default="qwen3-max", env="SIM_JUDGE_MODEL")
+        sim_default_turns: int = Field(default=5, env="SIM_DEFAULT_TURNS")
+        sim_max_turns: int = Field(default=10, env="SIM_MAX_TURNS")
+        sim_default_goal: str = Field(
+            default="Refine the currently bound plan to better achieve the user's objectives.",
+            env="SIM_DEFAULT_GOAL",
+        )
 
         class Config:
             env_file = ".env"
@@ -188,6 +196,20 @@ else:
             self.xai_api_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
             self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
             self.tavily_api_key = os.getenv("TAVILY_API_KEY")
+            self.sim_user_model = os.getenv("SIM_USER_MODEL", "qwen3-max")
+            self.sim_judge_model = os.getenv("SIM_JUDGE_MODEL", "qwen3-max")
+            try:
+                self.sim_default_turns = int(os.getenv("SIM_DEFAULT_TURNS", "5"))
+            except Exception:
+                self.sim_default_turns = 5
+            try:
+                self.sim_max_turns = int(os.getenv("SIM_MAX_TURNS", "10"))
+            except Exception:
+                self.sim_max_turns = 10
+            self.sim_default_goal = os.getenv(
+                "SIM_DEFAULT_GOAL",
+                "Refine the currently bound plan to better achieve the user's objectives.",
+            )
 
             # Embeddings 专用配置
             self.glm_embeddings_api_url = os.getenv("GLM_EMBEDDINGS_API_URL")
