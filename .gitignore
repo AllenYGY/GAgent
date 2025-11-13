@@ -4,8 +4,11 @@ data/
 example/
 *.pyc
 .env
+.env.old
 *.env
 web-ui/.env
 web-ui/.env.development
 web-ui/node_modules
-scripts/*
+.vscode/*
+direct_plans/*
+results/*

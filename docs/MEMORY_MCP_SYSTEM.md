@@ -24,6 +24,32 @@ Memory-MCP是一个集成到项目中的智能记忆管理系统，提供MCP（M
 - **定期进化**: 每10个记忆触发一次进化优化
 - **关系网络**: 构建记忆知识图谱
 
+## 与系统的集成方式
+
+面向后端的交互流程
+
+1. **统一的 HTTP/MCP 接口**  
+   - 所有客户端（Web 前端、外部 MCP 客户端、其他服务）都通过 `/mcp/save_memory`、`/mcp/query_memory`、`/mcp/memory/stats` 和 `/mcp/memory/auto_save_task` 四个路由与系统交互，详见 `app/api/memory_api.py`。  
+   - FastAPI 路由把 JSON 请求转换为 `SaveMemoryRequest` / `QueryMemoryRequest` 数据模型后，调用单例 `IntegratedMemoryService` 并将响应重新包装为 MCP 兼容格式（统一的 `context_id`、`meta` 字段等），确保内部实现细节对调用方透明。
+
+2. **服务内部依赖**（`app/services/memory/memory_service.py`）  
+   - **LLM 元数据分析**：缺省情况下会调 `get_default_client()` 自动抽取关键词、上下文、标签，在 `_analyze_content` 中完成，保证所有记忆条目都有结构化描述。  
+   - **嵌入向量生成**：调用 `get_embeddings_service()`（封装了 GLM API）为每条记忆生成语义向量，存入 `memory_embeddings` 表，供后续语义检索使用。  
+   - **数据库持久化**：通过 `get_db()` 写入 `memories` / `memory_embeddings` 表，并维护检索次数、连接关系等字段。  
+   - **进化与自动连接**：每次 `save_memory` 后会触发 `_process_memory_evolution`，定期运行 `_evolve_memories` 并调用 `_find_memory_connections` 自动为新记忆建立关联。
+
+3. **前端与聊天工作流**  
+   - 聊天面板在开启记忆模式时会在 `sendMessage` 之前调用 `/mcp/query_memory`，将相似度最高的若干条记忆拼接成 RAG 上下文，再把扩展后的内容发送给聊天后端（`web-ui/src/store/chat.ts`）。  
+   - 用户可以直接点击“Save to memory”或在 Memory 页面手动调用 `/mcp/save_memory`，前端使用 `memoryApi`（`web-ui/src/api/memory.ts`）封装所有请求，并在 Memory 页展示 `/mcp/memory/stats` 与检索结果。  
+   - 当任务/计划执行器完成某个任务后，可 POST `/mcp/memory/auto_save_task` 将任务输出归档为 “experience” 记忆，形成「任务 → 记忆 → 后续检索」的闭环。
+
+4. **运行时行为概览**  
+   - **保存**：调用者 → HTTP 接口 → `IntegratedMemoryService` → （LLM 生成元数据）→ 嵌入服务 → SQLite → 返回上下文字段。若嵌入失败，仍会保底存文本并允许后续 LIKE 查询。  
+   - **查询**：调用者 → HTTP 接口 → 服务生成查询向量 → 进行余弦相似度检索（失败则回退到全文检索）→ 返回带相似度、元数据的记忆列表。  
+   - **统计与进化**：`get_memory_stats` 聚合数据库指标；进化逻辑在保存流程中异步触发，更新链接、标签与演化计数。
+
+通过上述耦合方式，Memory 模块既保持 MCP 兼容的外部 API，又充分复用了系统现有的 LLM、嵌入、数据库与任务执行能力；任何新的代理或 UI 组件只需复用 `/mcp/*` 接口即可获得统一的记忆读写体验。
+
 ## API 接口
 
 ### 基础端点

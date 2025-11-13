@@ -8,6 +8,7 @@
 - 默认从环境变量加载，支持 .env（如存在）
 - 为后续扩展结构化日志与指标埋点提供稳定入口
 """
+
 import os
 from functools import lru_cache
 from typing import Optional
@@ -40,7 +41,7 @@ except Exception:
 try:
     from dotenv import load_dotenv  # type: ignore
 
-    load_dotenv()  # no-op if file missing; respects current working dir
+    load_dotenv(override=True)  # ensure .env values override exported vars
     _DOTENV_LOADED = True
 except Exception:
     _DOTENV_LOADED = False
@@ -56,7 +57,7 @@ if _USE_PYDANTIC:
 
         # 数据库配置（保留扩展位）
         database_url: str = Field(default="sqlite:///./tasks.db", env="DATABASE_URL")
-        
+
         # API服务配置
         base_url: Optional[str] = Field(default=None, env="BASE_URL")
 
@@ -74,12 +75,58 @@ if _USE_PYDANTIC:
         llm_backoff_base: float = Field(default=0.5, env="LLM_BACKOFF_BASE")
 
         # Perplexity API 配置
-        perplexity_api_key: Optional[str] = Field(default=None, env="PERPLEXITY_API_KEY")
+        perplexity_api_key: Optional[str] = Field(
+            default=None, env="PERPLEXITY_API_KEY"
+        )
         perplexity_api_url: str = Field(
             default="https://api.perplexity.ai/chat/completions",
             env="PERPLEXITY_API_URL",
         )
-        perplexity_model: str = Field(default="sonar-reasoning-pro", env="PERPLEXITY_MODEL")
+        perplexity_model: str = Field(
+            default="sonar-reasoning-pro", env="PERPLEXITY_MODEL"
+        )
+
+        # Doubao (Volcengine Ark)
+        doubao_api_key: Optional[str] = Field(default=None, env="DOUBAO_API_KEY")
+        doubao_api_url: str = Field(
+            default="https://ark.cn-beijing.volces.com/api/v3",
+            env="DOUBAO_API_URL",
+        )
+        doubao_model: str = Field(default="doubao-seed-1-6-251015", env="DOUBAO_MODEL")
+
+        # Moonshot / Kimi
+        moonshot_api_key: Optional[str] = Field(default=None, env="MOONSHOT_API_KEY")
+        moonshot_api_url: str = Field(
+            default="https://api.moonshot.cn/v1",
+            env="MOONSHOT_API_URL",
+        )
+        moonshot_model: str = Field(
+            default="kimi-k2-turbo-preview", env="MOONSHOT_MODEL"
+        )
+
+        # DeepSeek
+        deepseek_api_key: Optional[str] = Field(default=None, env="DEEPSEEK_API_KEY")
+        deepseek_api_url: str = Field(
+            default="https://api.deepseek.com",
+            env="DEEPSEEK_API_URL",
+        )
+        deepseek_model: str = Field(default="deepseek-chat", env="DEEPSEEK_MODEL")
+
+        # Grok / xAI
+        grok_api_key: Optional[str] = Field(default=None, env="GROK_API_KEY")
+        grok_api_url: str = Field(
+            default="https://api.x.ai/v1",
+            env="GROK_API_URL",
+        )
+        grok_model: str = Field(default="grok-4", env="GROK_MODEL")
+
+        # Gemini (OpenAI-compatible endpoint)
+        gemini_api_key: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+        gemini_api_url: str = Field(
+            default="https://generativelanguage.googleapis.com/v1beta/openai/",
+            env="GEMINI_API_URL",
+        )
+        gemini_model: str = Field(default="gemini-2.5-flash", env="GEMINI_MODEL")
 
         # QWEN API 配置
         qwen_api_key: Optional[str] = Field(default=None, env="QWEN_API_KEY")
@@ -90,22 +137,32 @@ if _USE_PYDANTIC:
         qwen_model: str = Field(default="qwen-turbo", env="QWEN_MODEL")
 
         # 通用LLM配置（用于选择提供商）
-        llm_provider: str = Field(default="glm", env="LLM_PROVIDER")  # glm, perplexity, qwen, openai, etc.
+        llm_provider: str = Field(
+            default="glm", env="LLM_PROVIDER"
+        )  # glm, perplexity, qwen, openai, etc.
 
         # GLM Embeddings 专用配置（集中到此，供 app.services.config 使用）
-        glm_embeddings_api_url: Optional[str] = Field(default=None, env="GLM_EMBEDDINGS_API_URL")
-        glm_embedding_model: str = Field(default="embedding-3", env="GLM_EMBEDDING_MODEL")
+        glm_embeddings_api_url: Optional[str] = Field(
+            default=None, env="GLM_EMBEDDINGS_API_URL"
+        )
+        glm_embedding_model: str = Field(
+            default="embedding-3", env="GLM_EMBEDDING_MODEL"
+        )
         glm_embedding_dimension: int = Field(default=1536, env="GLM_EMBEDDING_DIM")
         glm_batch_size: int = Field(default=25, env="GLM_BATCH_SIZE")
         semantic_default_k: int = Field(default=5, env="SEMANTIC_DEFAULT_K")
-        semantic_min_similarity: float = Field(default=0.3, env="SEMANTIC_MIN_SIMILARITY")
+        semantic_min_similarity: float = Field(
+            default=0.3, env="SEMANTIC_MIN_SIMILARITY"
+        )
         glm_max_retries: int = Field(default=3, env="GLM_MAX_RETRIES")
         glm_retry_delay: float = Field(default=1.0, env="GLM_RETRY_DELAY")
         glm_debug: bool = Field(default=False, env="GLM_DEBUG")
 
         # 嵌入缓存配置（避免在多个模块中直接读取环境变量）
         embedding_cache_size: int = Field(default=10000, env="EMBEDDING_CACHE_SIZE")
-        embedding_cache_persistent: bool = Field(default=True, env="EMBEDDING_CACHE_PERSISTENT")
+        embedding_cache_persistent: bool = Field(
+            default=True, env="EMBEDDING_CACHE_PERSISTENT"
+        )
 
         # 调试与上下文配置
         ctx_debug: bool = Field(default=False, env=["CTX_DEBUG", "CONTEXT_DEBUG"])
@@ -114,9 +171,15 @@ if _USE_PYDANTIC:
         global_index_path: str = Field(default="INDEX.md", env="GLOBAL_INDEX_PATH")
 
         # 外部提供商（可选）
-        openai_api_key: Optional[str] = Field(default=None, env=["OPENAI_API_KEY", "GPT_API_KEY"])
-        xai_api_key: Optional[str] = Field(default=None, env=["XAI_API_KEY", "GROK_API_KEY"])
-        anthropic_api_key: Optional[str] = Field(default=None, env=["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"])
+        openai_api_key: Optional[str] = Field(
+            default=None, env=["OPENAI_API_KEY", "GPT_API_KEY"]
+        )
+        xai_api_key: Optional[str] = Field(
+            default=None, env=["XAI_API_KEY", "GROK_API_KEY"]
+        )
+        anthropic_api_key: Optional[str] = Field(
+            default=None, env=["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"]
+        )
         tavily_api_key: Optional[str] = Field(default=None, env="TAVILY_API_KEY")
 
         # 服务器配置
@@ -124,17 +187,13 @@ if _USE_PYDANTIC:
         backend_port: int = Field(default=9000, env="BACKEND_PORT")
         cors_origins: str = Field(
             default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
-            env="CORS_ORIGINS"
+            env="CORS_ORIGINS",
         )
         chat_include_action_summary: bool = Field(
             default=True, env="CHAT_INCLUDE_ACTION_SUMMARY"
         )
-        job_log_retention_days: int = Field(
-            default=30, env="JOB_LOG_RETENTION_DAYS"
-        )
-        job_log_max_rows: int = Field(
-            default=10000, env="JOB_LOG_MAX_ROWS"
-        )
+        job_log_retention_days: int = Field(default=30, env="JOB_LOG_RETENTION_DAYS")
+        job_log_max_rows: int = Field(default=10000, env="JOB_LOG_MAX_ROWS")
         sim_user_model: str = Field(default="qwen3-max", env="SIM_USER_MODEL")
         sim_judge_model: str = Field(default="qwen3-max", env="SIM_JUDGE_MODEL")
         sim_default_turns: int = Field(default=5, env="SIM_DEFAULT_TURNS")
@@ -157,7 +216,7 @@ else:
                 try:
                     from dotenv import load_dotenv  # type: ignore
 
-                    load_dotenv()
+                    load_dotenv(override=True)
                 except Exception:
                     pass
             self.log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -165,7 +224,9 @@ else:
             self.database_url = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
             self.base_url = os.getenv("BASE_URL")
             self.glm_api_key = os.getenv("GLM_API_KEY")
-            self.glm_api_url = os.getenv("GLM_API_URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions")
+            self.glm_api_url = os.getenv(
+                "GLM_API_URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+            )
             self.glm_model = os.getenv("GLM_MODEL", "glm-4-flash")
             try:
                 self.glm_request_timeout = int(os.getenv("GLM_REQUEST_TIMEOUT", "60"))
@@ -175,13 +236,44 @@ else:
                 self.llm_request_timeout = int(os.getenv("LLM_REQUEST_TIMEOUT", "60"))
             except Exception:
                 self.llm_request_timeout = 60
-            self.llm_mock = os.getenv("LLM_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
-            
+            self.llm_mock = os.getenv("LLM_MOCK", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+
             # Perplexity API 配置
             self.perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
-            self.perplexity_api_url = os.getenv("PERPLEXITY_API_URL", "https://api.perplexity.ai/chat/completions")
+            self.perplexity_api_url = os.getenv(
+                "PERPLEXITY_API_URL", "https://api.perplexity.ai/chat/completions"
+            )
             self.perplexity_model = os.getenv("PERPLEXITY_MODEL", "sonar-reasoning-pro")
-            
+            self.doubao_api_key = os.getenv("DOUBAO_API_KEY")
+            self.doubao_api_url = os.getenv(
+                "DOUBAO_API_URL", "https://ark.cn-beijing.volces.com/api/v3"
+            )
+            self.doubao_model = os.getenv("DOUBAO_MODEL", "doubao-seed-1-6-251015")
+            self.moonshot_api_key = os.getenv("MOONSHOT_API_KEY")
+            self.moonshot_api_url = os.getenv(
+                "MOONSHOT_API_URL", "https://api.moonshot.cn/v1"
+            )
+            self.moonshot_model = os.getenv("MOONSHOT_MODEL", "kimi-k2-turbo-preview")
+            self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+            self.deepseek_api_url = os.getenv(
+                "DEEPSEEK_API_URL", "https://api.deepseek.com"
+            )
+            self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+            self.grok_api_key = os.getenv("GROK_API_KEY")
+            self.grok_api_url = os.getenv("GROK_API_URL", "https://api.x.ai/v1")
+            self.grok_model = os.getenv("GROK_MODEL", "grok-4")
+            self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+            self.gemini_api_url = os.getenv(
+                "GEMINI_API_URL",
+                "https://generativelanguage.googleapis.com/v1beta/openai/",
+            )
+            self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
             # 通用LLM配置
             self.llm_provider = os.getenv("LLM_PROVIDER", "glm")
             try:
@@ -192,9 +284,13 @@ else:
                 self.llm_backoff_base = float(os.getenv("LLM_BACKOFF_BASE", "0.5"))
             except Exception:
                 self.llm_backoff_base = 0.5
-            self.openai_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GPT_API_KEY")
+            self.openai_api_key = os.getenv("OPENAI_API_KEY") or os.getenv(
+                "GPT_API_KEY"
+            )
             self.xai_api_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
-            self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+            self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv(
+                "CLAUDE_API_KEY"
+            )
             self.tavily_api_key = os.getenv("TAVILY_API_KEY")
             self.sim_user_model = os.getenv("SIM_USER_MODEL", "qwen3-max")
             self.sim_judge_model = os.getenv("SIM_JUDGE_MODEL", "qwen3-max")
@@ -215,7 +311,9 @@ else:
             self.glm_embeddings_api_url = os.getenv("GLM_EMBEDDINGS_API_URL")
             self.glm_embedding_model = os.getenv("GLM_EMBEDDING_MODEL", "embedding-3")
             try:
-                self.glm_embedding_dimension = int(os.getenv("GLM_EMBEDDING_DIM", "1536"))
+                self.glm_embedding_dimension = int(
+                    os.getenv("GLM_EMBEDDING_DIM", "1536")
+                )
             except Exception:
                 self.glm_embedding_dimension = 1536
             try:
@@ -227,7 +325,9 @@ else:
             except Exception:
                 self.semantic_default_k = 5
             try:
-                self.semantic_min_similarity = float(os.getenv("SEMANTIC_MIN_SIMILARITY", "0.3"))
+                self.semantic_min_similarity = float(
+                    os.getenv("SEMANTIC_MIN_SIMILARITY", "0.3")
+                )
             except Exception:
                 self.semantic_min_similarity = 0.3
             try:
@@ -238,20 +338,31 @@ else:
                 self.glm_retry_delay = float(os.getenv("GLM_RETRY_DELAY", "1.0"))
             except Exception:
                 self.glm_retry_delay = 1.0
-            self.glm_debug = os.getenv("GLM_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+            self.glm_debug = os.getenv("GLM_DEBUG", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
 
             # 嵌入缓存配置
             try:
-                self.embedding_cache_size = int(os.getenv("EMBEDDING_CACHE_SIZE", "10000"))
+                self.embedding_cache_size = int(
+                    os.getenv("EMBEDDING_CACHE_SIZE", "10000")
+                )
             except Exception:
                 self.embedding_cache_size = 10000
-            self.embedding_cache_persistent = (os.getenv("EMBEDDING_CACHE_PERSISTENT", "1").strip() == "1")
+            self.embedding_cache_persistent = (
+                os.getenv("EMBEDDING_CACHE_PERSISTENT", "1").strip() == "1"
+            )
 
             # 调试与上下文配置
             def _truthy(v: str) -> bool:
                 return str(v).strip().lower() in {"1", "true", "yes", "on"}
 
-            self.ctx_debug = _truthy(os.getenv("CTX_DEBUG", "")) or _truthy(os.getenv("CONTEXT_DEBUG", ""))
+            self.ctx_debug = _truthy(os.getenv("CTX_DEBUG", "")) or _truthy(
+                os.getenv("CONTEXT_DEBUG", "")
+            )
             self.budget_debug = _truthy(os.getenv("BUDGET_DEBUG", ""))
             self.decomp_debug = _truthy(os.getenv("DECOMP_DEBUG", ""))
             self.global_index_path = os.getenv("GLOBAL_INDEX_PATH", "INDEX.md")
@@ -264,16 +375,20 @@ else:
                 self.backend_port = 9000
             self.cors_origins = os.getenv(
                 "CORS_ORIGINS",
-                "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
+                "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
             )
-            self.chat_include_action_summary = os.getenv("CHAT_INCLUDE_ACTION_SUMMARY", "1").strip().lower() in {
+            self.chat_include_action_summary = os.getenv(
+                "CHAT_INCLUDE_ACTION_SUMMARY", "1"
+            ).strip().lower() in {
                 "1",
                 "true",
                 "yes",
                 "on",
             }
             try:
-                self.job_log_retention_days = int(os.getenv("JOB_LOG_RETENTION_DAYS", "30"))
+                self.job_log_retention_days = int(
+                    os.getenv("JOB_LOG_RETENTION_DAYS", "30")
+                )
             except Exception:
                 self.job_log_retention_days = 30
             try:
