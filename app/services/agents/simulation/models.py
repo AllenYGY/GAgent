@@ -55,7 +55,16 @@ class JudgeVerdict(BaseModel):
     alignment: Literal["aligned", "misaligned", "unclear"]
     explanation: str
     confidence: Optional[float] = None
+    score: Optional[int] = Field(default=None, ge=0, le=1)
     raw_response: Optional[Dict[str, Any]] = None
+
+
+class AlignmentIssue(BaseModel):
+    """Tracks judge feedback for misaligned turns."""
+
+    turn_index: int
+    reason: str
+    delivered: bool = False
 
 
 class SimulatedTurn(BaseModel):
@@ -77,8 +86,10 @@ class SimulationRunConfig(BaseModel):
     session_id: Optional[str] = None
     plan_id: Optional[int] = None
     improvement_goal: Optional[str] = None
-    max_turns: int = Field(default=5, ge=1, le=20)
+    max_turns: int = Field(default=5, ge=1)
     auto_advance: bool = True
+    max_actions_per_turn: int = Field(default=2, ge=1, le=2)
+    enable_execute_actions: bool = False
 
 
 class SimulationRunState(BaseModel):
@@ -91,6 +102,7 @@ class SimulationRunState(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     error: Optional[str] = None
+    alignment_issues: list[AlignmentIssue] = Field(default_factory=list)
 
     def append_turn(self, turn: SimulatedTurn) -> None:
         self.turns.append(turn)

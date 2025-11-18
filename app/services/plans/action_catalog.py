@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 
 
-def build_action_catalog(plan_bound: bool) -> str:
+def build_action_catalog(plan_bound: bool, *, allow_execute: bool = True) -> str:
     """Return the shared ACTION catalog description used across agents."""
 
     base_actions: List[str] = [
@@ -13,7 +13,9 @@ def build_action_catalog(plan_bound: bool) -> str:
     ]
     if plan_bound:
         plan_actions: List[str] = [
-            "- plan_operation: create_plan, list_plans, execute_plan, delete_plan",
+            "- plan_operation: create_plan, list_plans{} delete_plan".format(
+                ", execute_plan," if allow_execute else ","
+            ),
             "- task_operation: create_task, update_task, update_task_instruction, move_task, delete_task, decompose_task, show_tasks, query_status, rerun_task",
             "- context_request: request_subgraph (request additional task context; this response must not include other actions)",
         ]

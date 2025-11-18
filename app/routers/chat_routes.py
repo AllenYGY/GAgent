@@ -1688,6 +1688,8 @@ class StructuredChatAgent:
         self._include_action_summary = getattr(
             app_settings, "chat_include_action_summary", True
         )
+        flag = self.extra_context.get("enable_execute_actions")
+        self.enable_execute_actions = True if flag is None else bool(flag)
 
     async def handle(self, user_message: str) -> AgentResult:
         structured = await self._invoke_llm(user_message)
@@ -1850,9 +1852,10 @@ class StructuredChatAgent:
     def _compose_action_catalog(self, plan_bound: bool) -> str:
         from app.services.plans.action_catalog import build_action_catalog
 
-        return build_action_catalog(plan_bound)
+        return build_action_catalog(plan_bound, allow_execute=self.enable_execute_actions)
 
     def _compose_guidelines(self, plan_bound: bool) -> str:
+        limit = self.extra_context.get("simulation_max_actions")
         common_rules = [
             "Return only a JSON object that matches the schema above—no code fences or additional commentary.",
             "`llm_reply.message` must be natural language directed to the user.",
@@ -1862,6 +1865,11 @@ class StructuredChatAgent:
             "Plan nodes do not provide a `priority` field; avoid fabricating it. `status` reflects progress and may be referenced when helpful.",
             "When the user explicitly asks to execute, run, or rerun a task or the plan, include the matching action or explain why it cannot proceed.",
         ]
+        if isinstance(limit, int):
+            common_rules.insert(
+                0,
+                f"Limit ACTIONS to at most {limit} per turn (prefer 1 when possible). Choose the highest-impact ACTIONS only.",
+            )
         if plan_bound:
             scenario_rules = [
                 "Verify that dependencies and prerequisite tasks are satisfied before executing a plan or task.",
@@ -2312,6 +2320,13 @@ class StructuredChatAgent:
             )
 
         if action.name == "execute_plan":
+            if not self.enable_execute_actions:
+                return AgentStep(
+                    action=action,
+                    success=False,
+                    message="Plan execution is disabled in this session.",
+                    details={"error": "execution_disabled"},
+                )
             tree = self._require_plan_bound()
             if self.plan_executor is None:
                 raise ValueError("Plan executor is not enabled in this environment.")

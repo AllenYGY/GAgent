@@ -12,3 +12,6 @@ web-ui/node_modules
 .vscode/*
 direct_plans/*
 results/*
+docs/plans/*
+experiments/*
+experiments-1/*

@@ -14,21 +14,22 @@ import asyncio
 import csv
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from dotenv import find_dotenv, load_dotenv
 
 # Ensure repository root is importable when running as a script.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dotenv import find_dotenv, load_dotenv
 
 from app.database import init_db
+from app.llm import PROVIDER_CONFIGS, LLMClient
 from app.repository.plan_repository import PlanRepository
-from app.llm import LLMClient, PROVIDER_CONFIGS
 from app.services.llm.llm_service import LLMService
 from app.services.plans.plan_models import PlanTree
 
@@ -203,7 +204,9 @@ def load_environment() -> None:
     if env_path:
         try:
             load_dotenv(env_path, override=True)
-            print(f"[INFO] Loaded environment variables from {env_path} (override enabled)")
+            print(
+                f"[INFO] Loaded environment variables from {env_path} (override enabled)"
+            )
         except Exception as exc:  # pragma: no cover - best effort notice
             print(
                 f"[WARN] Failed to parse {env_path}: {exc}. Check for invalid characters such as ';'."
@@ -392,7 +395,7 @@ def build_prompt(plan: PlanPayload, *, max_nodes: Optional[int]) -> str:
     schema_example = {
         "plan_id": plan.plan_id,
         "title": plan.title,
-        "scores": {dim["key"]: 4 for dim in DIMENSIONS},
+        "scores": {dim["key"]: 1 for dim in DIMENSIONS},
         "comments": 'Optional short justification ("" if none).',
     }
     instructions = (
@@ -538,7 +541,9 @@ async def evaluate_plans_async(
 # --- Output helpers -----------------------------------------------------------
 
 
-def write_outputs(records: List[EvaluationRecord], output_path: Path, jsonl_path: Path) -> None:
+def write_outputs(
+    records: List[EvaluationRecord], output_path: Path, jsonl_path: Path
+) -> None:
     if not records:
         print("[WARN] No evaluation records to write.")
         return
@@ -562,9 +567,7 @@ def write_outputs(records: List[EvaluationRecord], output_path: Path, jsonl_path
     with jsonl_path.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record.raw, ensure_ascii=False) + "\n")
-    print(
-        f"[INFO] Wrote {len(records)} evaluations to {output_path} and {jsonl_path}"
-    )
+    print(f"[INFO] Wrote {len(records)} evaluations to {output_path} and {jsonl_path}")
 
 
 # --- Entrypoint ---------------------------------------------------------------
@@ -618,7 +621,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
         except Exception as exc:
             return provider_name, False, f"Client init failed: {exc}"
-        print(f"[INFO] Provider '{provider_name}' configured with model '{llm_client.model}'.")
+        print(
+            f"[INFO] Provider '{provider_name}' configured with model '{llm_client.model}'."
+        )
 
         service = LLMService(llm_client)
         try:
@@ -634,9 +639,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         except Exception as exc:
             return provider_name, False, f"Evaluation failed: {exc}"
 
-        output_path = provider_suffix_path(args.output, provider_name) if use_suffix else args.output
+        output_path = (
+            provider_suffix_path(args.output, provider_name)
+            if use_suffix
+            else args.output
+        )
         jsonl_path = (
-            provider_suffix_path(args.jsonl_output, provider_name) if use_suffix else args.jsonl_output
+            provider_suffix_path(args.jsonl_output, provider_name)
+            if use_suffix
+            else args.jsonl_output
         )
         write_outputs(records, output_path, jsonl_path)
         return provider_name, True, None
@@ -646,7 +657,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     failures: List[str] = []
 
     with ThreadPoolExecutor(max_workers=max_workers or 1) as executor:
-        future_map = {executor.submit(run_for_provider, provider): provider for provider in target_providers}
+        future_map = {
+            executor.submit(run_for_provider, provider): provider
+            for provider in target_providers
+        }
         for future in as_completed(future_map):
             provider_name = future_map[future]
             try:

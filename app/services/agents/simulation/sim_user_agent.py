@@ -42,14 +42,20 @@ class SimulatedUserAgent:
         *,
         improvement_goal: Optional[str],
         previous_turns: Iterable[SimulatedTurn],
+        max_actions: int = 2,
+        allow_execute_actions: bool = True,
     ) -> SimulatedUserTurn:
         """Generate the next simulated user message and desired action."""
-        action_catalog = build_action_catalog(self.plan_session.plan_id is not None)
+        action_catalog = build_action_catalog(
+            self.plan_session.plan_id is not None,
+            allow_execute=allow_execute_actions,
+        )
         prompt = build_simulated_user_prompt(
             plan_outline=self._plan_outline(),
             improvement_goal=improvement_goal,
             previous_turns=previous_turns,
             action_catalog=action_catalog,
+            max_actions=max_actions,
         )
         logger.debug("Simulated user prompt:\n%s", prompt)
         response = await self.llm_service.chat_async(prompt, model=self.model)

@@ -12,6 +12,7 @@ from app.services.foundation.settings import get_settings
 from .judge_agent import JudgeAgent
 from .models import (
     ActionSpec,
+    AlignmentIssue,
     ChatAgentTurn,
     JudgeVerdict,
     SimulationRunState,
@@ -134,10 +135,15 @@ class SimulationOrchestrator:
         session = PlanSession(repo=self.plan_session.repo, plan_id=self.plan_session.plan_id)
         if session.plan_id is not None:
             session.refresh()
+        extra_context = {
+            "simulation_max_actions": state.config.max_actions_per_turn,
+            "enable_execute_actions": state.config.enable_execute_actions,
+        }
         agent = StructuredChatAgent(
             plan_session=session,
             history=history,
             session_id=state.config.session_id,
+            extra_context=extra_context,
         )
         result = await agent.handle(message)
         if self.plan_session.plan_id is not None:
@@ -316,6 +322,24 @@ class SimulationOrchestrator:
 
         return user_message_id, assistant_message_id
 
+    def _compose_chat_message(self, base_message: str, state: SimulationRunState) -> str:
+        pending_feedback = [issue for issue in state.alignment_issues if not issue.delivered]
+        if not pending_feedback:
+            return base_message
+        feedback_lines = [
+            f"- Turn {issue.turn_index}: {issue.reason.strip()}"
+            for issue in pending_feedback
+        ]
+        for issue in pending_feedback:
+            issue.delivered = True
+        feedback_block = "\n".join(feedback_lines)
+        composed = (
+            f"{base_message}\n\n"
+            "Judge feedback to address in this turn:\n"
+            f"{feedback_block}"
+        )
+        return composed
+
     async def run_turn(self, state: SimulationRunState) -> SimulatedTurn:
         """Run a single simulation turn and update state."""
         self._ensure_plan_binding(state.config.plan_id)
@@ -338,6 +362,8 @@ class SimulationOrchestrator:
         simulated_user_output = await self.sim_user_agent.generate_turn(
             improvement_goal=goal,
             previous_turns=state.turns,
+            max_actions=state.config.max_actions_per_turn,
+            allow_execute_actions=state.config.enable_execute_actions,
         )
         logger.info(
             "Simulation run %s turn %s user message: %s",
@@ -345,8 +371,13 @@ class SimulationOrchestrator:
             turn_index,
             _preview(simulated_user_output.message),
         )
+        delivered_message = self._compose_chat_message(
+            simulated_user_output.message,
+            state,
+        )
+        simulated_user_output.message = delivered_message
         agent_result, chat_turn = await self._run_chat_agent(
-            simulated_user_output.message, state
+            delivered_message, state
         )
         for idx, step in enumerate(agent_result.steps, start=1):
             logger.info(
@@ -372,6 +403,12 @@ class SimulationOrchestrator:
             turn_index,
             judge_verdict.alignment,
         )
+        if judge_verdict.alignment == "misaligned":
+            issue = AlignmentIssue(
+                turn_index=turn_index,
+                reason=judge_verdict.explanation,
+            )
+            state.alignment_issues.append(issue)
 
         state.config.improvement_goal = goal
 

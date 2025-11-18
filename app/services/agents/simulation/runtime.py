@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[3] / "data" / "simulation_runs"
 _OUTPUT_DIR = Path(os.getenv("SIMULATION_RUN_OUTPUT_DIR", str(_DEFAULT_OUTPUT_DIR)))
+_DEFAULT_SESSION_DIR = Path(__file__).resolve().parents[3] / "data" / "simulation_sessions"
+_SESSION_LOG_DIR = Path(
+    os.getenv("SIMULATION_SESSION_OUTPUT_DIR", str(_DEFAULT_SESSION_DIR))
+)
 
 
 class SimulationRegistry:
@@ -177,8 +181,60 @@ class SimulationRegistry:
                 len(run.turns),
                 output_path,
             )
+            self._persist_session_log(run)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to persist simulation run %s: %s", run.run_id, exc)
+
+    def _persist_session_log(self, run: SimulationRunState) -> None:
+        session_id = run.config.session_id
+        if not session_id:
+            return
+        try:
+            _SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            log_path = _SESSION_LOG_DIR / f"{session_id}.json"
+            turns_payload = []
+            for turn in run.turns:
+                turns_payload.append(
+                    {
+                        "index": turn.index,
+                        "goal": turn.goal,
+                        "simulated_user_message": turn.simulated_user.message,
+                        "chat_reply": turn.chat_agent.reply,
+                        "judge": turn.judge.model_dump() if turn.judge else None,
+                        "simulated_user_message_id": turn.simulated_user_message_id,
+                        "chat_agent_message_id": turn.chat_agent_message_id,
+                    }
+                )
+            alignment_payload = [issue.model_dump() for issue in run.alignment_issues]
+            payload = {
+                "session_id": session_id,
+                "run_id": run.run_id,
+                "plan_id": run.config.plan_id,
+                "status": run.status,
+                "max_turns": run.config.max_turns,
+                "remaining_turns": run.remaining_turns,
+                "alignment_issues": alignment_payload,
+                "turns": turns_payload,
+            }
+            with log_path.open("w", encoding="utf-8") as handle:
+                json.dump(
+                    payload,
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                    default=_json_default,
+                )
+            logger.info(
+                "Persisted session log for %s to %s",
+                session_id,
+                log_path,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist session log for %s: %s",
+                session_id,
+                exc,
+            )
 
 
 def format_run_summary(run: SimulationRunState) -> str:
@@ -190,8 +246,20 @@ def format_run_summary(run: SimulationRunState) -> str:
         f"Plan ID      : {run.config.plan_id}",
         f"Max turns    : {run.config.max_turns}",
         f"Auto advance : {run.config.auto_advance}",
+        f"Action limit : {run.config.max_actions_per_turn} per turn",
+        f"Execute plan : {run.config.enable_execute_actions}",
         "",
     ]
+    if run.alignment_issues:
+        lines.append("Misaligned turns:")
+        for issue in run.alignment_issues:
+            status = "delivered" if issue.delivered else "pending"
+            lines.append(
+                f"  - Turn {issue.turn_index} ({status}): {issue.reason}"
+            )
+    else:
+        lines.append("Misaligned turns: (none)")
+    lines.append("")
     if not run.turns:
         lines.append("No turns recorded.")
         return "\n".join(lines)

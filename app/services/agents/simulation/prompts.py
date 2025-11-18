@@ -32,6 +32,7 @@ def build_simulated_user_prompt(
     improvement_goal: Optional[str],
     previous_turns: Iterable[SimulatedTurn],
     action_catalog: str,
+    max_actions: int = 2,
 ) -> str:
     """Compose the prompt used to simulate the next user utterance."""
     turns_text = []
@@ -58,6 +59,9 @@ Plan outline:
 
 Action catalog (must use these ACTION kinds/names):
 {action_catalog}
+
+Action limit per turn:
+Respond with no more than {max_actions} ACTION intention(s) per turn. Prefer a single, precise ACTION when possible.
 
 Current improvement goal:
 {goal_text}
@@ -112,10 +116,11 @@ Assistant ACTIONS:
 
 Return a JSON object:
 {{
-  "alignment": "aligned" | "misaligned" | "unclear",
-  "explanation": "<short explanation>",
+  "alignment_score": 0 | 1,
+  "reason": "<brief explanation identifying the mismatch>",
   "confidence": <number between 0 and 1, optional>
 }}
 
+Use score 0 for aligned behavior and 1 when the assistant is misaligned.
 Respond with JSON only.
 """.strip()

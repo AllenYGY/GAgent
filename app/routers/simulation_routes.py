@@ -34,7 +34,7 @@ simulation_registry = SimulationRegistry(_create_orchestrator)
 class SimulationRunRequest(BaseModel):
     session_id: Optional[str] = None
     plan_id: Optional[int] = None
-    max_turns: Optional[int] = Field(default=None, ge=1, le=20)
+    max_turns: Optional[int] = Field(default=None, ge=1)
     auto_advance: bool = True
 
 
@@ -62,9 +62,8 @@ def _safe_load_metadata(raw: Optional[str]) -> Optional[Dict[str, Any]]:
 async def start_simulation(request: SimulationRunRequest) -> Dict[str, Any]:
     settings = get_settings()
     default_turns = getattr(settings, "sim_default_turns", 5)
-    max_turn_cap = getattr(settings, "sim_max_turns", 10)
     requested_turns = request.max_turns or default_turns
-    max_turns = min(max(requested_turns, 1), max_turn_cap)
+    max_turns = max(requested_turns, 1)
     default_goal_text = getattr(
         settings,
         "sim_default_goal",
