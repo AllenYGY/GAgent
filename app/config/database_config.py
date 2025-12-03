@@ -25,7 +25,7 @@ class DatabaseConfig:
         Path(self.db_root).mkdir(parents=True, exist_ok=True)
 
         # 创建子目录
-        subdirs = ["main", "cache", "temp", "backups", "plans", "jobs"]
+        subdirs = ["main", "cache", "temp", "backups", "plans", "jobs", "sessions"]
         for subdir in subdirs:
             Path(self.db_root, subdir).mkdir(parents=True, exist_ok=True)
 
@@ -56,6 +56,10 @@ class DatabaseConfig:
     def get_system_jobs_db_path(self) -> Path:
         """返回存放未绑定计划 Job 的数据库路径."""
         return Path(self.db_root, "jobs", "system_jobs.sqlite")
+
+    def get_session_store_dir(self) -> Path:
+        """返回 Session 独立数据库文件的目录."""
+        return Path(self.db_root, "sessions")
 
     def migrate_existing_databases(self):
         """迁移现有数据库文件到新结构"""

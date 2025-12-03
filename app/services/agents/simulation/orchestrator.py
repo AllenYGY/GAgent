@@ -5,7 +5,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.routers.chat_routes import StructuredChatAgent, _save_chat_message
+from app.routers.chat_routes import (
+    StructuredChatAgent,
+    _save_chat_message,
+    plan_decomposer_service,
+    plan_executor_service,
+)
 from app.services.plans.plan_session import PlanSession
 from app.services.foundation.settings import get_settings
 
@@ -47,6 +52,11 @@ class SimulationOrchestrator:
         judge_agent: Optional[JudgeAgent] = None,
     ) -> None:
         self.plan_session = plan_session or PlanSession()
+        # Feature flag for tool usage; default allow
+        self.plan_session.allow_web_search = getattr(self.plan_session, "allow_web_search", True)
+        self.plan_session.allow_rerun_task = getattr(self.plan_session, "allow_rerun_task", True)
+        self.plan_session.allow_graph_rag = getattr(self.plan_session, "allow_graph_rag", True)
+        self.plan_session.allow_show_tasks = getattr(self.plan_session, "allow_show_tasks", False)
         self.sim_user_agent = sim_user_agent or SimulatedUserAgent(plan_session=self.plan_session)
         self.judge_agent = judge_agent or JudgeAgent()
         settings = get_settings()
@@ -138,12 +148,18 @@ class SimulationOrchestrator:
         extra_context = {
             "simulation_max_actions": state.config.max_actions_per_turn,
             "enable_execute_actions": state.config.enable_execute_actions,
+            "allow_web_search": state.config.allow_web_search,
+            "allow_rerun_task": state.config.allow_rerun_task,
+            "allow_graph_rag": state.config.allow_graph_rag,
+            "allow_show_tasks": state.config.allow_show_tasks,
         }
         agent = StructuredChatAgent(
             plan_session=session,
             history=history,
             session_id=state.config.session_id,
             extra_context=extra_context,
+            plan_decomposer=plan_decomposer_service,
+            plan_executor=plan_executor_service,
         )
         result = await agent.handle(message)
         if self.plan_session.plan_id is not None:
@@ -322,23 +338,39 @@ class SimulationOrchestrator:
 
         return user_message_id, assistant_message_id
 
-    def _compose_chat_message(self, base_message: str, state: SimulationRunState) -> str:
+    def _compose_chat_message(
+        self,
+        base_message: str,
+        state: SimulationRunState,
+        desired_action: Optional[ActionSpec] = None,
+    ) -> str:
         pending_feedback = [issue for issue in state.alignment_issues if not issue.delivered]
-        if not pending_feedback:
-            return base_message
+        sections = [base_message]
+        if desired_action is not None and desired_action.parameters:
+            try:
+                params = desired_action.parameters or {}
+                extra_lines: List[str] = []
+                instr = params.get("instruction")
+                if isinstance(instr, str) and instr.strip():
+                    if instr.strip() not in base_message:
+                        extra_lines.append(f"Instruction detail: {instr.strip()}")
+                parent_id = params.get("parent_id")
+                if parent_id is not None and str(parent_id) not in base_message:
+                    extra_lines.append(f"Parent task id: {parent_id}")
+                if extra_lines:
+                    sections.append("\n".join(extra_lines))
+            except Exception:
+                pass
         feedback_lines = [
             f"- Turn {issue.turn_index}: {issue.reason.strip()}"
             for issue in pending_feedback
         ]
         for issue in pending_feedback:
             issue.delivered = True
-        feedback_block = "\n".join(feedback_lines)
-        composed = (
-            f"{base_message}\n\n"
-            "Judge feedback to address in this turn:\n"
-            f"{feedback_block}"
-        )
-        return composed
+        if feedback_lines:
+            feedback_block = "\n".join(feedback_lines)
+            sections.append("Judge feedback to address in this turn:\n" + feedback_block)
+        return "\n\n".join(sections)
 
     async def run_turn(self, state: SimulationRunState) -> SimulatedTurn:
         """Run a single simulation turn and update state."""
@@ -358,6 +390,11 @@ class SimulationOrchestrator:
         )
 
         goal = self._resolve_goal(state.config.improvement_goal)
+        # propagate tool flags to plan_session (used by sim user)
+        self.plan_session.allow_web_search = state.config.allow_web_search
+        self.plan_session.allow_rerun_task = state.config.allow_rerun_task
+        self.plan_session.allow_graph_rag = state.config.allow_graph_rag
+        self.plan_session.allow_show_tasks = state.config.allow_show_tasks
 
         simulated_user_output = await self.sim_user_agent.generate_turn(
             improvement_goal=goal,
@@ -374,6 +411,7 @@ class SimulationOrchestrator:
         delivered_message = self._compose_chat_message(
             simulated_user_output.message,
             state,
+            simulated_user_output.desired_action,
         )
         simulated_user_output.message = delivered_message
         agent_result, chat_turn = await self._run_chat_agent(

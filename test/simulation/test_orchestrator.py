@@ -19,7 +19,7 @@ class StubSimulatedUser:
     def __init__(self, plan_session: PlanSession) -> None:
         self.plan_session = plan_session
 
-    async def generate_turn(self, *, improvement_goal, previous_turns):
+    async def generate_turn(self, *, improvement_goal, previous_turns, **kwargs):
         return SimulatedUserTurn(
             message="Simulated user message",
             desired_action=ActionSpec(kind="plan_operation", name="create_plan", parameters={"title": "Demo"}),

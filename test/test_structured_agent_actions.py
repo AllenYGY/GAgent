@@ -7,10 +7,18 @@ import pytest
 
 from app.config import get_graph_rag_settings, get_search_settings
 from app.routers.chat_routes import StructuredChatAgent
-from app.services.llm.structured_response import LLMAction, LLMReply, LLMStructuredResponse
-from app.services.plans.plan_session import PlanSession
+from app.services.llm.structured_response import (
+    LLMAction,
+    LLMReply,
+    LLMStructuredResponse,
+)
 from app.services.plans.plan_decomposer import DecompositionResult
-from app.services.plans.plan_executor import ExecutionConfig, ExecutionResponse, PlanExecutor
+from app.services.plans.plan_executor import (
+    ExecutionConfig,
+    ExecutionResponse,
+    PlanExecutor,
+)
+from app.services.plans.plan_session import PlanSession
 
 
 def _response(actions: List[LLMAction], message: str = "ok") -> LLMStructuredResponse:
@@ -461,7 +469,7 @@ async def test_system_help_action(monkeypatch, plan_repo):
     monkeypatch.setattr(
         StructuredChatAgent,
         "_invoke_llm",
-        _stub_llm(_response(actions, "展示帮助")),
+        _stub_llm(_response(actions, "Show Help")),
     )
 
     result = await agent.handle("帮我介绍当前能力")
@@ -666,8 +674,12 @@ class _StubPlanDecomposer:
         self.last_plan_id = plan_id
         self.last_node_id = node_id
         created = [
-            self._repo.create_task(plan_id, name=f"Child {node_id}-1", parent_id=node_id),
-            self._repo.create_task(plan_id, name=f"Child {node_id}-2", parent_id=node_id),
+            self._repo.create_task(
+                plan_id, name=f"Child {node_id}-1", parent_id=node_id
+            ),
+            self._repo.create_task(
+                plan_id, name=f"Child {node_id}-2", parent_id=node_id
+            ),
         ]
         return DecompositionResult(
             plan_id=plan_id,

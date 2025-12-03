@@ -90,6 +90,11 @@ class SimulationRunConfig(BaseModel):
     auto_advance: bool = True
     max_actions_per_turn: int = Field(default=2, ge=1, le=2)
     enable_execute_actions: bool = False
+    allow_web_search: bool = True
+    allow_rerun_task: bool = True
+    allow_graph_rag: bool = True
+    allow_show_tasks: bool = False
+    stop_on_misalignment: bool = True
 
 
 class SimulationRunState(BaseModel):

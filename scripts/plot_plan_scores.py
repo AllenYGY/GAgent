@@ -77,18 +77,23 @@ def parse_args() -> argparse.Namespace:
 def find_score_files(scores_dir: Path) -> List[Path]:
     if not scores_dir.exists():
         raise FileNotFoundError(f"Scores directory not found: {scores_dir}")
-    files = sorted(scores_dir.glob("plan_scores*.csv"))
+    # Accept both legacy plan_scores*.csv and newer results*.csv naming
+    patterns = ["plan_scores*.csv", "results*.csv"]
+    files: List[Path] = []
+    for pat in patterns:
+        files.extend(scores_dir.glob(pat))
+    files = sorted(set(files))
     if not files:
         raise FileNotFoundError(
-            f"No plan_scores*.csv files found under {scores_dir}. "
+            f"No plan_scores*.csv or results*.csv files found under {scores_dir}. "
             "Run eval_plan_quality.py first."
         )
     return files
 
 
 def infer_provider_from_name(path: Path) -> str:
-    stem = path.stem  # e.g. plan_scores_qwen
-    match = re.match(r"plan_scores(?:[_\-](.+))?", stem)
+    stem = path.stem  # e.g. plan_scores_qwen or results_qwen
+    match = re.match(r"(?:plan_scores|results)(?:[_\-](.+))?", stem)
     if match:
         suffix = match.group(1)
         if suffix:

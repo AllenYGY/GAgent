@@ -8,7 +8,7 @@ import inspect
 import json
 import logging
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple, Union
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
@@ -29,17 +29,12 @@ from app.repository.plan_storage import (
     update_decomposition_job_status,
 )
 from app.services.foundation.settings import get_settings
-from app.services.memory.chat_memory_middleware import get_chat_memory_middleware
-from app.services.memory.memory_service import get_memory_service
-from app.models_memory import QueryMemoryRequest
 from app.services.llm.llm_service import get_llm_service
 from app.services.llm.structured_response import (
     LLMAction,
     LLMStructuredResponse,
     schema_as_json,
 )
-from app.services.plans.action_catalog import build_action_catalog
-from app.services.plans.action_schema import normalize_action
 from app.services.plans.decomposition_jobs import (
     get_current_job,
     log_job_event,
@@ -304,6 +299,9 @@ async def update_chat_session(
 
     try:
         with get_db() as conn:
+            # 确保session存在，如果不存在则自动创建
+            _ensure_session_exists(session_id, conn)
+            
             row = conn.execute(
                 "SELECT id FROM chat_sessions WHERE id=?", (session_id,)
             ).fetchone()
@@ -1090,14 +1088,9 @@ def _set_session_plan_id(session_id: str, plan_id: Optional[int]) -> None:
 
 
 def _save_chat_message(
-    session_id: str,
-    role: str,
-    content: str,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Optional[int]:
-    """Persist chat message and return the inserted row ID if available."""
-    if not session_id:
-        return None
+    session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None
+) -> None:
+    """Persist chat message."""
     try:
         from ..database import get_db  # lazy import to avoid circular deps
 
@@ -1121,7 +1114,22 @@ def _save_chat_message(
                 """,
                 (session_id, role, content, metadata_json),
             )
-            message_id = cursor.lastrowid
+            
+            # Process message through chat memory middleware
+            try:
+                from ..services.memory.chat_memory_middleware import get_chat_memory_middleware
+                
+                middleware = get_chat_memory_middleware()
+                # Run async middleware in background (fire and forget)
+                asyncio.create_task(
+                    middleware.process_message(
+                        content=content,
+                        role=role,
+                        session_id=session_id
+                    )
+                )
+            except Exception as mem_err:
+                logger.warning(f"Failed to process chat memory: {mem_err}")
             cursor.execute(
                 """
                 UPDATE chat_sessions
@@ -1132,10 +1140,8 @@ def _save_chat_message(
                 (session_id,),
             )
             conn.commit()
-            return int(message_id) if message_id is not None else None
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Failed to save chat message: %s", exc)
-    return None
 
 
 def _load_chat_history(session_id: str, limit: int = 50) -> List[ChatMessage]:
@@ -1279,6 +1285,90 @@ def _merge_async_metadata(
                 metadata["target_task_name"] = details["title"]
 
     return metadata
+
+
+async def _generate_tool_summary(
+    user_message: str,
+    tool_results: List[Dict[str, Any]],
+    session_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    让 LLM 基于工具执行结果生成自然语言总结。
+    
+    Args:
+        user_message: 用户的原始问题
+        tool_results: 工具执行结果列表
+        session_id: 会话 ID（用于日志）
+        
+    Returns:
+        LLM 生成的总结文本，如果失败则返回 None
+    """
+    try:
+        # 构建工具结果的描述
+        tools_description = []
+        for idx, tool_result in enumerate(tool_results, 1):
+            tool_name = tool_result.get("name", "unknown")
+            summary = tool_result.get("summary", "")
+            result_data = tool_result.get("result", {})
+            
+            # 提取关键信息
+            tool_desc = f"{idx}. 工具: {tool_name}"
+            if summary:
+                tool_desc += f"\n   执行摘要: {summary}"
+            
+            # 添加结果详情
+            if isinstance(result_data, dict):
+                # 提取有用的字段
+                useful_fields = ["output", "stdout", "stderr", "success", "error"]
+                for field in useful_fields:
+                    if field in result_data and result_data[field]:
+                        value = result_data[field]
+                        if isinstance(value, str) and len(value) > 500:
+                            value = value[:500] + "..."
+                        tool_desc += f"\n   {field}: {value}"
+            
+            tools_description.append(tool_desc)
+        
+        tools_text = "\n\n".join(tools_description)
+        
+        # Use prompt manager for internationalized prompts
+        from app.prompts import prompt_manager
+        
+        intro = prompt_manager.get("chat.tool_summary.intro")
+        user_q_label = prompt_manager.get("chat.tool_summary.user_question")
+        tools_label = prompt_manager.get("chat.tool_summary.tools_executed")
+        instruction = prompt_manager.get("chat.tool_summary.instruction")
+        requirements = prompt_manager.get_category("chat")["tool_summary"]["requirements"]
+        response_label = prompt_manager.get("chat.tool_summary.response_prompt")
+        
+        requirements_text = "\n".join(requirements)
+        
+        prompt = f"""{intro}
+
+{user_q_label}
+{user_message}
+
+{tools_label}
+{tools_text}
+
+{instruction}
+{requirements_text}
+
+{response_label}"""
+
+        # 调用 LLM
+        llm_service = get_llm_service()
+        summary = await llm_service.chat_async(prompt)
+        
+        return summary.strip() if summary else None
+        
+    except Exception as exc:
+        logger.error(
+            "[CHAT][SUMMARY] Failed to generate summary for session=%s: %s",
+            session_id,
+            exc,
+        )
+        return None
 
 
 async def _execute_action_run(run_id: str) -> None:
@@ -1443,11 +1533,41 @@ async def _execute_action_run(run_id: str) -> None:
         status = "completed" if result.success else "failed"
         result_dict = result.model_dump()
         tool_results_payload: List[Dict[str, Any]] = []
+        
+        # 诊断日志：记录所有步骤
+        logger.info(
+            "[CHAT][TOOL_RESULTS] session=%s tracking=%s total_steps=%d success=%s",
+            record.get("session_id"),
+            run_id,
+            len(result.steps),
+            result.success,
+        )
+        
         for step in result.steps:
+            logger.info(
+                "[CHAT][TOOL_RESULTS] session=%s tracking=%s step_kind=%s step_name=%s step_success=%s",
+                record.get("session_id"),
+                run_id,
+                step.action.kind,
+                step.action.name,
+                step.success,
+            )
+            
             if step.action.kind != "tool_operation":
                 continue
             details = step.details or {}
             result_payload = details.get("result")
+            
+            # 诊断日志：记录result类型
+            logger.info(
+                "[CHAT][TOOL_RESULTS] session=%s tracking=%s tool=%s result_type=%s has_result=%s",
+                record.get("session_id"),
+                run_id,
+                step.action.name,
+                type(result_payload).__name__,
+                result_payload is not None,
+            )
+            
             if isinstance(result_payload, dict):
                 tool_results_payload.append({
                     "name": step.action.name,
@@ -1455,8 +1575,81 @@ async def _execute_action_run(run_id: str) -> None:
                     "parameters": details.get("parameters"),
                     "result": result_payload,
                 })
+            else:
+                # 如果不是dict，尝试包装一下
+                logger.warning(
+                    "[CHAT][TOOL_RESULTS] session=%s tracking=%s tool=%s result is not dict, wrapping it",
+                    record.get("session_id"),
+                    run_id,
+                    step.action.name,
+                )
+                tool_results_payload.append({
+                    "name": step.action.name,
+                    "summary": details.get("summary"),
+                    "parameters": details.get("parameters"),
+                    "result": {"output": str(result_payload)} if result_payload is not None else {},
+                })
+        
         if tool_results_payload:
             result_dict["tool_results"] = tool_results_payload
+            logger.info(
+                "[CHAT][TOOL_RESULTS] session=%s tracking=%s collected %d tool results",
+                record.get("session_id"),
+                run_id,
+                len(tool_results_payload),
+            )
+        
+        # Agent Loop: 让 LLM 基于工具结果生成最终总结
+        # 关键：必须在 update_action_run 之前完成，否则前端会停止轮询
+        final_summary = None
+        if result.success and tool_results_payload:
+            logger.info(
+                "[CHAT][SUMMARY] session=%s tracking=%s Starting summary generation...",
+                record.get("session_id"),
+                run_id,
+            )
+            try:
+                final_summary = await _generate_tool_summary(
+                    user_message=record.get("user_message", ""),
+                    tool_results=tool_results_payload,
+                    session_id=record.get("session_id"),
+                )
+                if final_summary:
+                    # 保存 LLM 的总结作为新的 assistant 消息
+                    _save_chat_message(
+                        session_id=record.get("session_id"),
+                        role="assistant",
+                        content=final_summary,
+                        metadata={
+                            "type": "tool_summary",
+                            "tracking_id": run_id,
+                            "tool_count": len(tool_results_payload),
+                        },
+                    )
+                    # 将总结添加到 result_dict 中，前端可以直接显示
+                    result_dict["final_summary"] = final_summary
+                    logger.info(
+                        "[CHAT][SUMMARY] session=%s tracking=%s Summary saved: %s",
+                        record.get("session_id"),
+                        run_id,
+                        final_summary[:100] if len(final_summary) > 100 else final_summary,
+                    )
+                else:
+                    logger.warning(
+                        "[CHAT][SUMMARY] session=%s tracking=%s Summary generation returned empty",
+                        record.get("session_id"),
+                        run_id,
+                    )
+            except Exception as exc:
+                logger.error(
+                    "[CHAT][SUMMARY] session=%s tracking=%s Failed to generate summary: %s",
+                    record.get("session_id"),
+                    run_id,
+                    exc,
+                    exc_info=True,
+                )
+        
+        # 现在才更新状态为 completed，前端会在下次轮询时看到总结消息
         update_kwargs: Dict[str, Any] = {
             "status": status,
             "result": result_dict,
@@ -1464,6 +1657,13 @@ async def _execute_action_run(run_id: str) -> None:
         }
         if result.bound_plan_id is not None:
             update_kwargs["plan_id"] = result.bound_plan_id
+        
+        logger.info(
+            "[CHAT][SUMMARY] session=%s tracking=%s Updating action status to %s",
+            record.get("session_id"),
+            run_id,
+            status,
+        )
         update_action_run(run_id, **update_kwargs)
 
         job_snapshot = plan_decomposition_jobs.get_job_payload(job.job_id)
@@ -1546,6 +1746,16 @@ async def get_action_status(tracking_id: str):
 
     actions, tool_results = _build_action_status_payloads(record)
 
+    # 提取 final_summary 以便前端显示
+    result_data = record.get("result") or {}
+    final_summary = result_data.get("final_summary")
+    
+    metadata = {}
+    if tool_results:
+        metadata["tool_results"] = tool_results
+    if final_summary:
+        metadata["final_summary"] = final_summary
+    
     return ActionStatusResponse(
         tracking_id=tracking_id,
         status=record["status"],
@@ -1556,7 +1766,7 @@ async def get_action_status(tracking_id: str):
         created_at=record.get("created_at"),
         started_at=record.get("started_at"),
         finished_at=record.get("finished_at"),
-        metadata={"tool_results": tool_results} if tool_results else None,
+        metadata=metadata if metadata else None,
     )
 
 
@@ -1693,15 +1903,10 @@ class StructuredChatAgent:
         self._include_action_summary = getattr(
             app_settings, "chat_include_action_summary", True
         )
-        flag = self.extra_context.get("enable_execute_actions")
-        self.enable_execute_actions = True if flag is None else bool(flag)
 
     async def handle(self, user_message: str) -> AgentResult:
-        await self._save_memory_message(role="user", content=user_message)
         structured = await self._invoke_llm(user_message)
-        result = await self.execute_structured(structured)
-        await self._save_memory_message(role="assistant", content=result.reply)
-        return result
+        return await self.execute_structured(structured)
 
     async def get_structured_response(self, user_message: str) -> LLMStructuredResponse:
         """Return the raw structured response without executing actions."""
@@ -1781,7 +1986,7 @@ class StructuredChatAgent:
                         self.plan_session.plan_id,
                         job_id=job_id,
                         status="succeeded" if success else "failed",
-                        finished_at=datetime.now(datetime.UTC),
+                        finished_at=datetime.utcnow(),
                         stats={
                             "step_count": len(steps),
                             "success": success,
@@ -1797,41 +2002,12 @@ class StructuredChatAgent:
 
     async def _invoke_llm(self, user_message: str) -> LLMStructuredResponse:
         self._current_user_message = user_message
-        memory_snippets = await self._fetch_memories(user_message)
-        prompt = self._build_prompt(user_message, memory_snippets=memory_snippets)
+        prompt = self._build_prompt(user_message)
         raw = await self.llm_service.chat_async(prompt, force_real=True)
         cleaned = self._strip_code_fence(raw)
-        structured = LLMStructuredResponse.model_validate_json(cleaned)
-        normalized_actions = []
-        invalid_actions: List[str] = []
-        for action in structured.actions:
-            try:
-                params = normalize_action(action.kind, action.name, action.parameters or {})
-                action.parameters = params
-                # Enforce carrying user-provided instruction for create_task
-                if (
-                    action.kind == "task_operation"
-                    and action.name == "create_task"
-                    and (not action.parameters or not action.parameters.get("instruction"))
-                ):
-                    # Fallback: use the user message verbatim to avoid dropping critical guidance
-                    action.parameters["instruction"] = user_message.strip()
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Invalid action parameters for %s/%s: %s; dropping action",
-                    action.kind,
-                    action.name,
-                    exc,
-                )
-                invalid_actions.append(f"{action.kind}/{action.name}: {exc}")
-                continue
-            normalized_actions.append(action)
-        structured.actions = normalized_actions
-        if invalid_actions:
-            logger.debug("Dropped %d invalid action(s): %s", len(invalid_actions), invalid_actions)
-        return structured
+        return LLMStructuredResponse.model_validate_json(cleaned)
 
-    def _build_prompt(self, user_message: str, *, memory_snippets: str = "") -> str:
+    def _build_prompt(self, user_message: str) -> str:
         plan_bound = self.plan_session.plan_id is not None
         history_text = self._format_history()
         context_text = json.dumps(self.extra_context, ensure_ascii=False, indent=2)
@@ -1848,13 +2024,9 @@ class StructuredChatAgent:
             f"Session binding: {plan_status}",
             f"Extra context:\n{context_text}",
             f"History (latest {self.MAX_HISTORY} messages):\n{history_text}",
-        ]
-        if memory_snippets:
-            prompt_parts.append("\n=== Retrieved Memories ===\n" + memory_snippets)
-        prompt_parts.extend([
             "\n=== Plan Overview ===",
             plan_outline,
-        ])
+        ]
         if plan_catalog:
             prompt_parts.append(plan_catalog)
         prompt_parts.extend([
@@ -1891,94 +2063,42 @@ class StructuredChatAgent:
         )
 
     def _compose_action_catalog(self, plan_bound: bool) -> str:
-        allow_web_search = self.extra_context.get("allow_web_search", True)
-        allow_rerun_task = self.extra_context.get("allow_rerun_task", True)
-        allow_graph_rag = self.extra_context.get("allow_graph_rag", True)
-        allow_show_tasks = self.extra_context.get("allow_show_tasks", False)
-        return build_action_catalog(
-            plan_bound,
-            allow_execute=self.enable_execute_actions,
-            allow_web_search=allow_web_search,
-            allow_rerun_task=allow_rerun_task,
-            allow_graph_rag=allow_graph_rag,
-            allow_show_tasks=allow_show_tasks,
-        )
-
-    async def _save_memory_message(self, *, role: str, content: str) -> None:
-        settings = get_settings()
-        if not getattr(settings, "memory_auto_save_enabled", True):
-            return
-        if not content:
-            return
-        try:
-            middleware = get_chat_memory_middleware()
-            await middleware.process_message(
-                content=content,
-                role=role,
-                session_id=self.session_id,
-                plan_id=self.plan_session.plan_id,
-            )
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.debug("Memory save skipped: %s", exc)
-
-    async def _fetch_memories(self, user_message: str) -> str:
-        settings = get_settings()
-        if not getattr(settings, "memory_retrieve_enabled", True):
-            return ""
-        try:
-            memory_service = get_memory_service()
-            request = QueryMemoryRequest(
-                search_text=user_message,
-                memory_types=None,
-                limit=getattr(settings, "memory_query_limit", 5),
-                min_similarity=getattr(settings, "memory_min_similarity", 0.6),
-                include_task_context=False,
-                plan_id=self.plan_session.plan_id,
-                session_id=self.session_id,
-            )
-            response = await memory_service.query_memory(request)
-            if not response.memories:
-                return ""
-            lines = []
-            for item in response.memories:
-                lines.append(
-                    f"- [{item.memory_type.value}/{item.importance.value}] "
-                    f"{item.content.strip()}"
-                )
-            return "\n".join(lines)
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.debug("Memory retrieval skipped: %s", exc)
-            return ""
+        base_actions = [
+            "- system_operation: help",
+            "- tool_operation: web_search (use for live web information; requires `query`, optional provider/max_results)",
+            "- tool_operation: graph_rag (query the phage-host knowledge graph; requires `query`, optional top_k/hops/return_subgraph/focus_entities)",
+            "- tool_operation: claude_code (execute complex coding tasks using Claude AI with full local file access; requires `task`, optional allowed_tools/add_dirs)",
+        ]
+        if plan_bound:
+            plan_actions = [
+                "- plan_operation: create_plan, list_plans, execute_plan, delete_plan",
+                "- task_operation: create_task, update_task, update_task_instruction, move_task, delete_task, decompose_task, show_tasks, query_status, rerun_task",
+                "- context_request: request_subgraph (request additional task context; this response must not include other actions)",
+            ]
+        else:
+            plan_actions = [
+                "- plan_operation: create_plan  # only when the user explicitly asks to create a plan",
+                "- plan_operation: list_plans  # list candidates; do not execute or mutate tasks while unbound",
+            ]
+        return "\n".join(base_actions + plan_actions)
 
     def _compose_guidelines(self, plan_bound: bool) -> str:
-        limit = self.extra_context.get("simulation_max_actions")
         common_rules = [
             "Return only a JSON object that matches the schema above—no code fences or additional commentary.",
             "`llm_reply.message` must be natural language directed to the user.",
             "Fill `actions` in execution order (`order` starts at 1); use an empty array if no actions are required.",
             "Use the `kind`/`name` pairs from the action catalog without inventing new values.",
-            "Preserve any user-provided identifiers, citations, alert numbers, or source names exactly in both text and action parameters; do not substitute or paraphrase them.",
-            "For `task_operation/create_task`, always include `name` (required) and, when relevant, `instruction` and `parent_id`; never emit this action without a `name`.",
-            "If the user supplied `instruction` or other parameters for a create/update request, include them verbatim in the action (do NOT drop the instruction or rewrite the params).",
-            "For `tool_operation/web_search`, when the user provides `query`/`max_results`, use them verbatim—do not add, drop, or rewrite keywords. If you believe filters (e.g., site/year) are needed, first restate the user-supplied query unchanged and ask for confirmation.",
             "A `request_subgraph` reply may contain only that action.",
             "Plan nodes do not provide a `priority` field; avoid fabricating it. `status` reflects progress and may be referenced when helpful.",
             "When the user explicitly asks to execute, run, or rerun a task or the plan, include the matching action or explain why it cannot proceed.",
         ]
-        if isinstance(limit, int):
-            common_rules.insert(
-                0,
-                f"Limit ACTIONS to at most {limit} per turn (prefer 1 when possible). Choose the highest-impact ACTIONS only.",
-            )
         if plan_bound:
             scenario_rules = [
                 "Verify that dependencies and prerequisite tasks are satisfied before executing a plan or task.",
                 "When the user wants to run the entire plan, call `plan_operation.execute_plan` and provide a summary if appropriate.",
                 "When the user targets a specific task (for example, \"run the first task\" or \"rerun task 42\"), call `task_operation.show_tasks` first if the ID is unclear, then `task_operation.rerun_task` with a concrete `task_id`.",
                 "Use `web_search` or `graph_rag` only when the user explicitly asks for web data or knowledge-graph lookup; otherwise rely on available context or ask clarifying questions.",
-                "When `web_search` is used, craft a clear query and summarize results with sources. If the user supplied concrete keywords/constraints (e.g., phishing, RDP, third-party vendor), include them verbatim in the query—add context after, never drop the user terms. When `graph_rag` is used, describe phage-related insights and cite triples when helpful.",
-                "Before `task_operation.create_task`, check existing tasks under the same parent for identical/similar names; if a matching task already exists, reference it instead of creating a duplicate, or propose updating the existing task.",
-                "For any user request to create/update a task, do not drop required fields. If the user provided an instruction or other parameters, carry them fully into the ACTION parameters (no omission or rewriting).",
+                "When `web_search` is used, craft a clear query and summarize results with sources. When `graph_rag` is used, describe phage-related insights and cite triples when helpful.",
                 "After gathering supporting information, continue scheduling or executing the requested plan or tasks—do not stop at preparation only.",
             ]
         else:
@@ -2305,6 +2425,67 @@ class StructuredChatAgent:
                 "focus_entities": focus_entities,
             }
 
+        elif tool_name == "claude_code":
+            # Claude Code CLI - requires task parameter
+            task_value = params.get("task")
+            if not isinstance(task_value, str) or not task_value.strip():
+                return AgentStep(
+                    action=action,
+                    success=False,
+                    message="claude_code requires a non-empty `task` string.",
+                    details={"error": "invalid_task", "tool": tool_name},
+                )
+
+            # 🔍 A-mem集成：查询历史执行经验
+            original_task = task_value.strip()
+            enhanced_task = original_task
+            amem_experiences = []
+            
+            try:
+                from ..services.amem_client import get_amem_client
+                amem_client = get_amem_client()
+                
+                if amem_client.enabled:
+                    # 查询相似的历史执行经验
+                    amem_experiences = await amem_client.query_experiences(
+                        query=original_task,
+                        top_k=3
+                    )
+                    
+                    if amem_experiences:
+                        # 格式化经验供LLM参考
+                        experience_context = amem_client.format_experiences_for_llm(amem_experiences)
+                        enhanced_task = f"{original_task}\n\n{experience_context}"
+                        logger.info(
+                            f"[AMEM] Enhanced task with {len(amem_experiences)} historical experiences"
+                        )
+            except Exception as amem_err:
+                logger.warning(f"[AMEM] Failed to query experiences: {amem_err}")
+                # 继续执行，不影响主流程
+
+            # Optional: allowed_tools parameter
+            allowed_tools = params.get("allowed_tools")
+            if allowed_tools and not isinstance(allowed_tools, str):
+                allowed_tools = str(allowed_tools)
+
+            # Optional: add_dirs parameter
+            add_dirs_param = params.get("add_dirs")
+            add_dirs: Optional[str] = None
+            if add_dirs_param is not None:
+                if isinstance(add_dirs_param, list):
+                    add_dirs = ",".join(str(d) for d in add_dirs_param if d)
+                elif isinstance(add_dirs_param, str):
+                    add_dirs = add_dirs_param
+
+            # Build final params (使用增强后的任务描述)
+            params = {
+                "task": enhanced_task,
+            }
+            if allowed_tools:
+                params["allowed_tools"] = allowed_tools
+            if add_dirs:
+                params["add_dirs"] = add_dirs
+
         else:
             return AgentStep(
                 action=action,
@@ -2338,6 +2519,28 @@ class StructuredChatAgent:
             message = summary or f"{tool_name} failed to execute."
         else:
             message = summary or f"{tool_name} finished execution."
+
+        # 💾 A-mem集成：保存执行结果（异步，不阻塞主流程）
+        if tool_name == "claude_code":
+            try:
+                from ..services.amem_client import get_amem_client
+                amem_client = get_amem_client()
+                
+                if amem_client.enabled:
+                    # 异步保存到A-mem
+                    asyncio.create_task(
+                        amem_client.save_execution(
+                            task=original_task,  # 使用原始任务描述
+                            result=sanitized,
+                            session_id=self.session_id,
+                            plan_id=self.plan_session.plan_id,
+                            key_findings=summary  # 将总结作为关键发现
+                        )
+                    )
+                    logger.info("[AMEM] Scheduled execution result save")
+            except Exception as amem_err:
+                logger.warning(f"[AMEM] Failed to schedule save: {amem_err}")
+                # 不影响主流程
 
         return AgentStep(
             action=action,
@@ -2422,13 +2625,6 @@ class StructuredChatAgent:
             )
 
         if action.name == "execute_plan":
-            if not self.enable_execute_actions:
-                return AgentStep(
-                    action=action,
-                    success=False,
-                    message="Plan execution is disabled in this session.",
-                    details={"error": "execution_disabled"},
-                )
             tree = self._require_plan_bound()
             if self.plan_executor is None:
                 raise ValueError("Plan executor is not enabled in this environment.")
@@ -2961,6 +3157,43 @@ class StructuredChatAgent:
         return deps or None
 
     def _sanitize_tool_result(self, tool_name: str, raw_result: Any) -> Dict[str, Any]:
+        if tool_name == "claude_code" and isinstance(raw_result, dict):
+            def _trim(text: str, limit: int = 800) -> str:
+                text = text.strip()
+                if len(text) > limit:
+                    return text[: limit - 3] + "..."
+                return text
+
+            sanitized: Dict[str, Any] = {
+                "tool": tool_name,
+                "code": raw_result.get("code"),
+                "owner": raw_result.get("owner"),
+                "language": raw_result.get("language", "python"),
+                "uploaded_files": raw_result.get("uploaded_files") or [],
+                "success": raw_result.get("success", False),
+            }
+
+            stdout_value = raw_result.get("stdout")
+            if isinstance(stdout_value, str) and stdout_value.strip():
+                sanitized["stdout"] = _trim(stdout_value)
+
+            stderr_value = raw_result.get("stderr")
+            if isinstance(stderr_value, str) and stderr_value.strip():
+                sanitized["stderr"] = _trim(stderr_value, limit=400)
+
+            output_value = raw_result.get("output")
+            if isinstance(output_value, str) and output_value.strip():
+                sanitized["output"] = _trim(output_value)
+
+            if "error" in raw_result:
+                sanitized["error"] = str(raw_result["error"])
+
+            tool_calls = raw_result.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                sanitized["tool_calls"] = tool_calls
+
+            return sanitized
+
         if isinstance(raw_result, dict):
             sanitized: Dict[str, Any] = {"tool": tool_name}
             for key in (
@@ -3082,6 +3315,23 @@ class StructuredChatAgent:
                     snippet = snippet[:117] + "..."
                 return f"{prefix} finished. Prompt summary: {snippet}"
             return f"{prefix} finished."
+        if tool_name == "claude_code":
+            if result.get("success") is False:
+                error = result.get("error") or "Code execution failed"
+                return f"Claude Code execution failed: {error}"
+            
+            uploaded = result.get("uploaded_files") or []
+            file_info = f" (with {len(uploaded)} file(s))" if uploaded else ""
+            
+            stdout_text = result.get("stdout") or result.get("output") or ""
+            if stdout_text.strip():
+                snippet = stdout_text.strip()
+                if len(snippet) > 150:
+                    snippet = snippet[:147] + "..."
+                return f"Claude Code execution{file_info} succeeded. Output: {snippet}"
+            
+            return f"Claude Code execution{file_info} succeeded."
+        
         return f"{tool_name} finished execution."
 
     def _append_recent_tool_result(

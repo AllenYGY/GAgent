@@ -28,6 +28,7 @@ class ChatMemoryMiddleware:
         content: str,
         role: str = "user",
         session_id: Optional[str] = None,
+        plan_id: Optional[int] = None,
         force_save: bool = False,
     ) -> Optional[str]:
         """
@@ -55,7 +56,7 @@ class ChatMemoryMiddleware:
 
         # 保存为记忆（使用LLM判断的类型）
         try:
-            from ....memory_service import get_memory_service
+            from .memory_service import get_memory_service
             from ...models_memory import SaveMemoryRequest
 
             memory_service = get_memory_service()
@@ -66,12 +67,16 @@ class ChatMemoryMiddleware:
             tags = ["对话", role]
             if session_id:
                 tags.append(f"session:{session_id}")
+            if plan_id is not None:
+                tags.append(f"plan:{plan_id}")
 
             request = SaveMemoryRequest(
                 content=memory_content,
                 memory_type=memory_type,
                 importance=importance,
                 tags=tags,
+                session_id=session_id,
+                plan_id=plan_id,
             )
 
             response = await memory_service.save_memory(request)

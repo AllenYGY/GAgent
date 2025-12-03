@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from ....memory_service import get_memory_service
+from .memory_service import get_memory_service
 from ...models_memory import ImportanceLevel, MemoryType, SaveMemoryRequest
 
 logger = logging.getLogger(__name__)

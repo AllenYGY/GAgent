@@ -15,6 +15,8 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { memoryApi } from '@api/memory';
+import { chatApi } from '@api/chat';
+import { planTreeApi } from '@api/planTree';
 import { useMemoryStore } from '@store/memory';
 import SaveMemoryModal from '@components/memory/SaveMemoryModal';
 import MemoryDetailDrawer from '@components/memory/MemoryDetailDrawer';
@@ -63,6 +65,9 @@ const MemoryPage: React.FC = () => {
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('list');
   const [searchInput, setSearchInput] = useState(filters.search_query);
+  const [selectedSession, setSelectedSession] = useState<string>('');
+  const [selectedPlan, setSelectedPlan] = useState<string>('');
+  const [minSimilarity, setMinSimilarity] = useState<number>(filters.min_similarity || 0.0);
 
   // Debounce search input for 500 ms
   const debouncedSearchQuery = useDebounce(searchInput, 500);
@@ -73,6 +78,33 @@ const MemoryPage: React.FC = () => {
       setFilters({ search_query: debouncedSearchQuery });
     }
   }, [debouncedSearchQuery]);
+
+  // Sync min similarity back to store when changed
+  useEffect(() => {
+    setFilters({ min_similarity: minSimilarity });
+  }, [minSimilarity]);
+
+  // 拉取会话与计划列表供选择
+  const { data: sessions } = useQuery({
+    queryKey: ['memory-session-options'],
+    queryFn: () => chatApi.getSessions({ limit: 200, offset: 0 }),
+    staleTime: 60 * 1000,
+  });
+
+  const { data: plans } = useQuery({
+    queryKey: ['memory-plan-options'],
+    queryFn: () => planTreeApi.listPlans(),
+    staleTime: 60 * 1000,
+  });
+
+  const parseSourceTags = useCallback((tags: string[]) => {
+    const sessionTag = tags.find((tag) => tag.startsWith('session:'));
+    const planTag = tags.find((tag) => tag.startsWith('plan:'));
+    return {
+      session: sessionTag ? sessionTag.replace(/^session:/, '') : undefined,
+      plan: planTag ? planTag.replace(/^plan:/, '') : undefined,
+    };
+  }, []);
 
   // Fetch memory statistics
   const { data: stats, error: statsError, isError: isStatsError } = useQuery({
@@ -100,13 +132,15 @@ const MemoryPage: React.FC = () => {
     isError: isQueryError,
     refetch
   } = useQuery({
-    queryKey: ['memories', filters],
+    queryKey: ['memories', filters, selectedSession, selectedPlan],
     queryFn: () => memoryApi.queryMemory({
-      search_text: filters.search_query || ' ',
+      search_text: filters.search_query ? filters.search_query : '*',
       memory_types: filters.memory_types as any[],
       importance_levels: filters.importance_levels as any[],
       limit: 100,
-      min_similarity: filters.min_similarity,
+      min_similarity: minSimilarity,
+      session_id: selectedSession || undefined,
+      plan_id: selectedPlan ? Number(selectedPlan) : undefined,
     }),
     refetchInterval: 30000,
     retry: 2,
@@ -146,6 +180,9 @@ const MemoryPage: React.FC = () => {
   // Clear all filters
   const handleClearFilters = useCallback(() => {
     setSearchInput('');
+    setSelectedSession('');
+    setSelectedPlan('');
+    setMinSimilarity(0.0);
     clearFilters();
     refetch();
   }, [clearFilters, refetch]);
@@ -259,6 +296,22 @@ const MemoryPage: React.FC = () => {
           {keywords.length > 3 && <Tag>+{keywords.length - 3}</Tag>}
         </Space>
       ),
+    },
+    {
+      title: 'Source',
+      dataIndex: 'tags',
+      key: 'source',
+      width: 180,
+      render: (tags: string[]) => {
+        const { session, plan } = parseSourceTags(tags || []);
+        if (!session && !plan) return '-';
+        return (
+          <Space size={[4, 4]} wrap>
+            {session && <Tag color="geekblue">Session:{session}</Tag>}
+            {plan && <Tag color="cyan">Plan:{plan}</Tag>}
+          </Space>
+        );
+      },
     },
     {
       title: 'Similarity',
@@ -432,6 +485,48 @@ const MemoryPage: React.FC = () => {
               />
 
               <Select
+                showSearch
+                allowClear
+                placeholder="Session"
+                style={{ minWidth: 220 }}
+                value={selectedSession || undefined}
+                onChange={(value) => setSelectedSession(value || '')}
+                options={(sessions?.sessions || []).map((s) => ({
+                  label: s.name ? `${s.name} (${s.id})` : s.id,
+                  value: s.id,
+                }))}
+                optionFilterProp="label"
+                disabled={isLoading}
+              />
+
+              <Select
+                showSearch
+                allowClear
+                placeholder="Plan"
+                style={{ minWidth: 200 }}
+                value={selectedPlan || undefined}
+                onChange={(value) => setSelectedPlan(value || '')}
+                options={(plans || []).map((p) => ({
+                  label: p.title ? `${p.title} (#${p.id})` : `Plan #${p.id}`,
+                  value: String(p.id),
+                }))}
+                optionFilterProp="label"
+                disabled={isLoading}
+              />
+
+              <Input
+                type="number"
+                placeholder="Min similarity (0-1)"
+                style={{ width: 200 }}
+                value={minSimilarity}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(e) => setMinSimilarity(parseFloat(e.target.value || '0'))}
+                disabled={isLoading}
+              />
+
+              <Select
                 mode="multiple"
                 placeholder="Memory types"
                 style={{ minWidth: 180 }}
@@ -446,6 +541,7 @@ const MemoryPage: React.FC = () => {
                 maxTagCount="responsive"
                 disabled={isLoading}
               />
+
 
               <Select
                 mode="multiple"

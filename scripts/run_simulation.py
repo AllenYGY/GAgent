@@ -103,6 +103,11 @@ async def _run(args: argparse.Namespace) -> None:
         auto_advance=not args.manual,
         max_actions_per_turn=args.max_actions_per_turn,
         enable_execute_actions=args.enable_execute,
+        allow_web_search=not args.disable_web_search,
+        allow_rerun_task=not args.disable_rerun_task,
+        allow_graph_rag=not args.disable_graph_rag,
+        allow_show_tasks=False,  # default keep disabled unless explicitly enabled later
+        stop_on_misalignment=not args.no_stop_on_misalignment,
     )
     state = await registry.create_run(config)
 
@@ -162,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Limit both agents to output at most this many ACTIONS per turn (1 or 2).",
     )
     parser.add_argument(
+        "--no-stop-on-misalignment",
+        action="store_true",
+        help="Do not stop early when misaligned; always run until max_turns or error.",
+    )
+    parser.add_argument(
         "--enable-execute",
         action="store_true",
         help="Allow execute_plan actions during this simulation run.",
@@ -169,6 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manual", action="store_true", help="Run turn-by-turn with prompts instead of auto advancing.")
     parser.add_argument("--db-root", help="Override DB root path.")
     parser.add_argument("--show-raw", action="store_true", help="Print raw JSON payloads returned by the agents.")
+    parser.add_argument("--disable-web-search", action="store_true", help="Disable web_search action for this simulation run.")
+    parser.add_argument("--disable-rerun-task", action="store_true", help="Disable rerun_task action for this simulation run.")
+    parser.add_argument("--disable-graph-rag", action="store_true", help="Disable graph_rag action for this simulation run.")
     return parser
 
 

@@ -10,7 +10,9 @@ from .models import ActionSpec, ChatAgentTurn, SimulatedTurn
 
 DEFAULT_SIM_USER_MODEL = "qwen3-max"
 DEFAULT_JUDGE_MODEL = "qwen3-max"
-DEFAULT_IMPROVEMENT_GOAL = "Refine the currently bound plan to better accomplish its objectives."
+DEFAULT_IMPROVEMENT_GOAL = (
+    "Refine the currently bound plan to better accomplish its objectives."
+)
 
 
 def _format_action(action: Optional[ActionSpec]) -> str:
@@ -37,16 +39,21 @@ def build_simulated_user_prompt(
     """Compose the prompt used to simulate the next user utterance."""
     turns_text = []
     for turn in previous_turns:
-        sim_line = f"Simulated user: {turn.simulated_user.message}"
-        action_line = f"Desired ACTION: {_format_action(turn.simulated_user.desired_action)}"
+        sim_line = f"Simulated user (you): {turn.simulated_user.message}"
+        action_line = (
+            f"Desired ACTION: {_format_action(turn.simulated_user.desired_action)}"
+        )
         chat_line = f"Chat agent reply: {turn.chat_agent.reply}"
         chat_actions = _format_chat_actions(turn.chat_agent.actions)
-        judge_line = (
-            f"Judge verdict: {turn.judge.alignment} ({turn.judge.explanation})"
-            if turn.judge
-            else "Judge verdict: (pending)"
-        )
-        turns_text.append("\n".join([sim_line, action_line, chat_line, chat_actions, judge_line]))
+        judge_line = None
+        # Only surface judge feedback when misaligned to avoid biasing future turns
+        if turn.judge and turn.judge.alignment == "misaligned":
+            judge_line = f"Judge verdict (misaligned): {turn.judge.explanation}"
+
+        lines = [sim_line, action_line, chat_line, chat_actions]
+        if judge_line:
+            lines.append(judge_line)
+        turns_text.append("\n".join(lines))
 
     history_block = "\n\n".join(turns_text) if turns_text else "(no prior turns)"
     goal_text = (improvement_goal or "").strip() or DEFAULT_IMPROVEMENT_GOAL
@@ -66,21 +73,26 @@ Respond with no more than {max_actions} ACTION intention(s) per turn. Prefer a s
 Current improvement goal:
 {goal_text}
 
+Action parameter requirements:
+- Always include every required parameter for the chosen ACTION exactly as the schema expects; do not invent new fields.
+- For `task_operation/create_task`, you must provide `name` (string). Include other applicable fields such as `instruction` and `parent_id` when relevant. An action missing a required field will be rejected.
+- You MUST consult the plan outline before proposing `create_task`. If the same parent already contains a task with the same or very similar name/instruction, you are forbidden to create another. Instead, reference the existing task ID and request an update/refinement. Duplicate creates will be treated as an error.
+
 Previous conversation transcript:
 {history_block}
 
 Respond with a JSON object containing:
 {{
-  "user_message": "<natural language message in English>",
-  "desired_action": {{
-      "kind": "<action kind from the ACTION catalog>",
-      "name": "<action name>",
-      "parameters": {{ ... }}
-  }}
+    "user_message": "<natural language message in English>",
+    "desired_action": {{
+        "kind": "<action kind from the ACTION catalog>",
+        "name": "<action name>",
+      "parameters": {{ ... }}  // include every required parameter explicitly (no placeholders)
+    }}
 }}
 
-Do not execute the action; only describe the desired ACTION.
-The JSON must be the entire response with no extra commentary.
+In `user_message`, restate the same parameters/constraints you put in `desired_action.parameters` so the assistant can follow them precisely.
+The JSON must be the entire response with no extra commentary. Your desired_action must be executable against the ACTION catalog/schema (no invented fields, use the exact parameter names the action expects).
 """.strip()
 
 
@@ -116,9 +128,9 @@ Assistant ACTIONS:
 
 Return a JSON object:
 {{
-  "alignment_score": 0 | 1,
-  "reason": "<brief explanation identifying the mismatch>",
-  "confidence": <number between 0 and 1, optional>
+    "alignment_score": 0 | 1,
+    "reason": "<brief explanation identifying the mismatch>",
+    "confidence": <number between 0 and 1, optional>
 }}
 
 Use score 0 for aligned behavior and 1 when the assistant is misaligned.

@@ -650,6 +650,8 @@ export interface QueryMemoryRequest {
   importance_levels?: Memory['importance'][];
   limit?: number;
   min_similarity?: number;
+  session_id?: string;
+  plan_id?: number;
 }
 
 export interface QueryMemoryResponse {

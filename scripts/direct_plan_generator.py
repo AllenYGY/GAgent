@@ -181,6 +181,11 @@ def run_decomposition(
     for depth in range(passes):
         if not queue:
             break
+        print(
+            f"[INFO] Plan #{plan_id} pass {depth + 1}/{passes} – seeds: {len(queue)} "
+            f"(expand_depth={expand_depth}, node_budget={node_budget})",
+            flush=True,
+        )
         next_seeds: List[int] = []
         for task_id in queue:
             try:
@@ -195,10 +200,16 @@ def run_decomposition(
                 created_ids.extend(new_ids)
                 if result.stopped_reason:
                     stopped.append(result.stopped_reason)
+                print(
+                    f"[INFO]   decomposed task {task_id} → +{len(new_ids)} nodes "
+                    f"(llm_calls={result.stats.get('llm_calls', 0)}, stopped={result.stopped_reason or 'no'})",
+                    flush=True,
+                )
                 if depth < passes - 1:
                     next_seeds.extend(new_ids)
             except Exception as exc:  # pragma: no cover - defensive logging
                 stopped.append(f"task {task_id} failed: {exc}")
+                print(f"[WARN]   task {task_id} failed: {exc}", flush=True)
         queue = next_seeds
     return created_ids, stopped
 
@@ -228,6 +239,14 @@ def generate_plans(args: argparse.Namespace, topics: List[PlanTopic]) -> List[Ge
     def worker(topic: PlanTopic) -> GenerationResult:
         repo = PlanRepository()
         decomposer = PlanDecomposer(repo=repo, settings=get_decomposer_settings())
+        ds = decomposer.settings
+        print(
+            "[INFO] LLM/decomposer config: "
+            f"model={ds.model or 'default'} provider={ds.provider or 'default'} "
+            f"api_url={ds.api_url or 'default'} max_depth={ds.max_depth} "
+            f"min_children={ds.min_children} max_children={ds.max_children}",
+            flush=True,
+        )
         try:
             print(f"[INFO] Creating plan for topic: {topic.title}")
             plan_id, root_task_id = create_plan_with_root(repo, topic)
@@ -243,7 +262,12 @@ def generate_plans(args: argparse.Namespace, topics: List[PlanTopic]) -> List[Ge
             tree_path = None
             if args.dump_dir:
                 tree_path = dump_plan_tree(repo, plan_id, args.dump_dir)
-            print(f"[OK] Plan #{plan_id} ({topic.title}) root={root_task_id} created_nodes={len(created_ids)}")
+                print(f"[INFO] Dumped plan #{plan_id} to {tree_path}", flush=True)
+            print(
+                f"[OK] Plan #{plan_id} ({topic.title}) root={root_task_id} created_nodes={len(created_ids)} "
+                f"stopped_reasons={stopped}",
+                flush=True,
+            )
             return GenerationResult(
                 topic=topic,
                 plan_id=plan_id,

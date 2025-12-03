@@ -76,6 +76,8 @@ class SaveMemoryRequest(BaseModel):
     importance: ImportanceLevel = Field(default=ImportanceLevel.MEDIUM, description="重要性级别")
     tags: Optional[List[str]] = Field(default=None, description="标签列表")
     related_task_id: Optional[int] = Field(default=None, description="关联任务ID")
+    session_id: Optional[str] = Field(default=None, description="关联会话ID")
+    plan_id: Optional[int] = Field(default=None, description="关联计划ID")
 
     # 可选的语义元数据
     keywords: Optional[List[str]] = Field(default=None, description="关键词列表")
@@ -114,6 +116,8 @@ class QueryMemoryRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=100, description="返回数量限制")
     min_similarity: float = Field(default=0.01, ge=0.0, le=1.0, description="最小相似度阈值")
     include_task_context: bool = Field(default=False, description="是否包含任务上下文")
+    session_id: Optional[str] = Field(default=None, description="过滤指定会话来源")
+    plan_id: Optional[int] = Field(default=None, description="过滤指定计划（并使用对应的计划数据库）")
 
 
 class MemoryItem(BaseModel):

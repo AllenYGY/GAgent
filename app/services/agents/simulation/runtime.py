@@ -101,7 +101,7 @@ class SimulationRegistry:
             run.mark_running()
 
         try:
-            await orchestrator.run_turn(run)
+            turn = await orchestrator.run_turn(run)
         except Exception as exc:
             async with self._lock:
                 run = self._runs.get(run_id)
@@ -118,6 +118,18 @@ class SimulationRegistry:
 
         async with self._lock:
             run = self._runs[run_id]
+            # Stop early if this turn is misaligned
+            if (
+                turn.judge
+                and turn.judge.alignment == "misaligned"
+                and run.config.stop_on_misalignment
+            ):
+                run.finish("finished")
+                logger.info(
+                    "Simulation run %s stopped early due to misalignment at turn %s",
+                    run_id,
+                    len(run.turns),
+                )
             if run.remaining_turns <= 0:
                 run.finish("finished")
                 logger.info(

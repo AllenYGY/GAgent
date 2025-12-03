@@ -211,9 +211,16 @@ class LLMClient(LLMProvider):
 
         if not self.api_key:
             raise RuntimeError(f"{self.provider.upper()}_API_KEY is not set in environment")
+        # Use structured content blocks to satisfy providers that require `type: text`.
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": prompt}],
+            }
+        ]
         payload = {
             "model": model or self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         if self.payload_defaults:
             payload.update(self.payload_defaults)

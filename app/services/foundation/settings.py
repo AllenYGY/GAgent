@@ -192,12 +192,19 @@ if _USE_PYDANTIC:
         chat_include_action_summary: bool = Field(
             default=True, env="CHAT_INCLUDE_ACTION_SUMMARY"
         )
+        # Memory 相似度下限、文本匹配的默认相似度
+        memory_min_similarity: float = Field(default=0.6, env="MEMORY_MIN_SIMILARITY")
+        memory_text_similarity: float = Field(default=1.0, env="MEMORY_TEXT_SIMILARITY")
         job_log_retention_days: int = Field(default=30, env="JOB_LOG_RETENTION_DAYS")
         job_log_max_rows: int = Field(default=10000, env="JOB_LOG_MAX_ROWS")
         sim_user_model: str = Field(default="qwen3-max", env="SIM_USER_MODEL")
         sim_judge_model: str = Field(default="qwen3-max", env="SIM_JUDGE_MODEL")
         sim_default_turns: int = Field(default=5, env="SIM_DEFAULT_TURNS")
         sim_max_turns: int = Field(default=10, env="SIM_MAX_TURNS")
+        memory_auto_save_enabled: bool = Field(default=True, env="MEMORY_AUTO_SAVE_ENABLED")
+        memory_retrieve_enabled: bool = Field(default=True, env="MEMORY_RETRIEVE_ENABLED")
+        memory_query_limit: int = Field(default=5, env="MEMORY_QUERY_LIMIT")
+        memory_min_similarity: float = Field(default=0.6, env="MEMORY_MIN_SIMILARITY")
         sim_default_goal: str = Field(
             default="Refine the currently bound plan to better achieve the user's objectives.",
             env="SIM_DEFAULT_GOAL",
@@ -306,6 +313,28 @@ else:
                 "SIM_DEFAULT_GOAL",
                 "Refine the currently bound plan to better achieve the user's objectives.",
             )
+            self.memory_auto_save_enabled = os.getenv("MEMORY_AUTO_SAVE_ENABLED", "true").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            self.memory_retrieve_enabled = os.getenv("MEMORY_RETRIEVE_ENABLED", "true").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            try:
+                self.memory_query_limit = int(os.getenv("MEMORY_QUERY_LIMIT", "5"))
+            except Exception:
+                self.memory_query_limit = 5
+            try:
+                self.memory_min_similarity = float(
+                    os.getenv("MEMORY_MIN_SIMILARITY", "0.6")
+                )
+            except Exception:
+                self.memory_min_similarity = 0.6
 
             # Embeddings 专用配置
             self.glm_embeddings_api_url = os.getenv("GLM_EMBEDDINGS_API_URL")

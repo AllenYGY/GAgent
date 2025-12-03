@@ -13,9 +13,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from app.services.agents.simulation.models import JudgeVerdict
+from app.services.llm.llm_service import LLMService
 
 
 @dataclass
@@ -153,6 +158,10 @@ def _run_single_simulation(
     session_logs_dir: Path,
     max_actions_per_turn: int,
     enable_execute: bool,
+    disable_web_search: bool,
+    disable_rerun_task: bool,
+    disable_graph_rag: bool,
+    no_stop_on_misalignment: bool,
 ) -> tuple[int, int]:
     env = os.environ.copy()
     env["DB_ROOT"] = str(task.db_root)
@@ -179,6 +188,15 @@ def _run_single_simulation(
         cmd.append("--show-raw")
     if enable_execute:
         cmd.append("--enable-execute")
+    if disable_web_search:
+        cmd.append("--disable-web-search")
+    if disable_rerun_task:
+        cmd.append("--disable-rerun-task")
+    if disable_graph_rag:
+        cmd.append("--disable-graph-rag")
+    if no_stop_on_misalignment:
+        cmd.append("--no-stop-on-misalignment")
+    # show_tasks stays disabled by default; no enable flag exposed
 
     task.log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(task.log_path, "w", encoding="utf-8") as log_file:
@@ -200,12 +218,194 @@ def _run_single_simulation(
     return task.index, returncode
 
 
+def _extract_misaligned_turns(log_path: Path) -> List[int]:
+    """Parse the per-run log to find misaligned turn indices from the summary."""
+    turns: List[int] = []
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return turns
+
+    for idx, line in enumerate(text):
+        if line.strip().startswith("Misaligned turns:"):
+            # Following lines like "  - Turn 2 (pending): ..."
+            for follow in text[idx + 1 :]:
+                stripped = follow.strip()
+                if not stripped.startswith("- Turn"):
+                    break
+                try:
+                    # "- Turn 2 (pending): ..." -> 2
+                    after_turn = stripped.split("Turn", 1)[1].strip()
+                    turn_num = int(after_turn.split()[0])
+                    turns.append(turn_num)
+                except Exception:
+                    continue
+            break
+    return turns
+
+
+# ---------------- full_plan utilities ---------------- #
+DEFAULT_FULL_PLAN_JUDGE_PROMPT = """You are a strict evaluator. Given a user goal and two full plans (baseline and agent), decide if the agent plan aligns with the goal and the baseline intent.
+- Respond ONLY in JSON with fields: alignment (aligned|misaligned|unclear), reason (string).
+- Do not include code fences or extra text.
+
+User goal:
+{goal}
+
+Simulated user baseline plan:
+{baseline_plan}
+
+Chat agent plan:
+{agent_plan}
+"""
+
+DEFAULT_FULL_PLAN_CHAT_PROMPT = """You are a planning assistant. Given a current plan, recent agent plans (if any), and the goal, produce an improved full plan as strict JSON only.
+- Do NOT include code fences or extra text.
+- Include tasks with fields: id (int), name, instruction, parent_id (null for roots), dependencies (id list), status ("pending"), position (int order).
+- Keep dependencies consistent; parent_id must reference defined tasks or null for roots.
+- Aim to make the plan clearer, more complete, and executable. Depth ≤3, total tasks ≤30.
+
+Goal:
+{goal}
+
+Current plan JSON:
+{baseline_plan}
+
+Recent agent plans (last 10, may be empty):
+{history}
+"""
+
+DEFAULT_FULL_PLAN_SIM_USER_PROMPT = """You are a simulated user refining a plan. Given the last agent plan (baseline) and recent agent plans, produce an updated full plan as strict JSON only.
+- Do NOT include code fences or extra text.
+- Include tasks with fields: id (int), name, instruction, parent_id (null for roots), dependencies (id list), status ("pending"), position (int order).
+- Keep dependencies consistent; parent_id must reference defined tasks or null for roots.
+- Keep depth ≤3 and total tasks ≤30. Focus on clarity and usability rather than aggressive restructuring.
+
+Goal:
+{goal}
+
+Baseline plan JSON:
+{baseline_plan}
+
+Recent agent plans (last 10, may be empty):
+{history}
+"""
+
+
+def _load_plan_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _judge_full_plan_pair(
+    baseline_plan_path: Path,
+    agent_plan_path: Path,
+    goal: str,
+    llm: LLMService,
+    prompt_template: str,
+) -> JudgeVerdict:
+    try:
+        prompt = prompt_template.format(
+            goal=goal,
+            baseline_plan=_load_plan_text(baseline_plan_path),
+            agent_plan=_load_plan_text(agent_plan_path),
+        )
+        resp = llm.chat(prompt)
+        try:
+            payload = json.loads(resp)
+        except json.JSONDecodeError:
+            return JudgeVerdict(
+                alignment="unclear",
+                explanation="Invalid JSON from judge",
+                raw_response={"raw": resp},
+            )
+
+        alignment = str(payload.get("alignment") or "").strip().lower()
+        if alignment not in {"aligned", "misaligned", "unclear"}:
+            alignment = "unclear"
+        explanation = (
+            str(payload.get("reason") or payload.get("explanation") or "").strip()
+            or "No explanation provided."
+        )
+        return JudgeVerdict(
+            alignment=alignment,  # type: ignore[arg-type]
+            explanation=explanation,
+            raw_response=payload,
+        )
+    except Exception as exc:
+        return JudgeVerdict(
+            alignment="unclear",
+            explanation=f"Judge error: {exc}",
+            raw_response={"error": str(exc)},
+        )
+
+
+def _strip_code_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.lstrip("`")
+        if "\n" in cleaned:
+            cleaned = cleaned.split("\n", 1)[1]
+    if cleaned.endswith("```"):
+        cleaned = cleaned.rstrip("`")
+    return cleaned.strip()
+
+
+def _parse_plan_text(raw: str) -> Dict[str, Any]:
+    cleaned = _strip_code_fences(raw)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            snippet = cleaned[start : end + 1]
+            return json.loads(snippet)
+        raise
+
+
+def _generate_agent_plan(
+    baseline_plan_path: Path,
+    run_idx: int,
+    turn_idx: int,
+    goal: str,
+    llm: LLMService,
+    prompt_template: str,
+    raw_dir: Path,
+    parsed_dir: Path,
+    history_text: str,
+) -> Path:
+    prompt = prompt_template.format(
+        goal=goal,
+        baseline_plan=_load_plan_text(baseline_plan_path),
+        history=history_text or "None",
+    )
+    raw_resp = llm.chat(prompt)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.txt"
+    raw_path.write_text(raw_resp, encoding="utf-8")
+    payload = _parse_plan_text(raw_resp)
+    parsed_path = parsed_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.json"
+    parsed_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return parsed_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run multiple simulations in parallel."
     )
     parser.add_argument(
-        "--plan-id", type=int, required=True, help="Source plan id to clone."
+        "--mode",
+        choices=["action", "full_plan"],
+        default="action",
+        help="Simulation mode: action (default, tool actions) or full_plan (direct plan JSON scoring).",
+    )
+    parser.add_argument(
+        "--plan-id",
+        type=int,
+        help="Source plan id to clone (required for action mode).",
     )
     parser.add_argument(
         "--runs",
@@ -235,7 +435,9 @@ def main() -> None:
         help="Allow execute_plan actions during simulations (disabled by default).",
     )
     parser.add_argument(
-        "--goal", help="Optional override goal passed to each simulation run."
+        "--goal",
+        default="Improve the current plan to make it clearer, more complete, and executable.",
+        help="User goal/intent for both action and full_plan modes (default: improve the current plan).",
     )
     parser.add_argument(
         "--db-root", help="Source DB_ROOT to copy (defaults to app config / env)."
@@ -246,18 +448,255 @@ def main() -> None:
         help="Directory to store experiment artifacts (default experiments).",
     )
     parser.add_argument(
+        "--input-plan-json",
+        type=str,
+        help="In full_plan mode: file or directory of plan_*.json (PlanTree) to judge directly (skip action simulation).",
+    )
+    parser.add_argument(
+        "--full-plan-judge-prompt",
+        type=Path,
+        help="Optional prompt template for full_plan judge (default internal).",
+    )
+    parser.add_argument(
+        "--full-plan-chat-prompt",
+        type=Path,
+        help="Optional prompt template for chat agent full plan generation (default internal).",
+    )
+    parser.add_argument(
+        "--full-plan-sim-user-prompt",
+        type=Path,
+        help="Optional prompt template for simulated user full plan generation (default internal).",
+    )
+    parser.add_argument(
         "--show-raw",
         action="store_true",
         help="Forward --show-raw to each simulation run.",
     )
+    parser.add_argument(
+        "--disable-web-search",
+        action="store_true",
+        help="Disable web_search action for all simulations.",
+    )
+    parser.add_argument(
+        "--disable-rerun-task",
+        action="store_true",
+        help="Disable rerun_task action for all simulations.",
+    )
+    parser.add_argument(
+        "--disable-graph-rag",
+        action="store_true",
+        help="Disable graph_rag action for all simulations.",
+    )
+    parser.add_argument(
+        "--no-stop-on-misalignment",
+        action="store_true",
+        help="Do not stop early when misaligned; run all turns to max_turns.",
+    )
     args = parser.parse_args()
 
+    if args.mode == "action" and args.plan_id is None:
+        parser.error("--plan-id is required in action mode")
+    if args.mode == "full_plan" and not args.input_plan_json:
+        parser.error("--input-plan-json is required in full_plan mode")
+
     source_db_root = Path(args.db_root or os.getenv("DB_ROOT", "data/databases"))
-    if not source_db_root.exists():
+    if args.mode == "action" and not source_db_root.exists():
         parser.error(f"Source DB_ROOT not found: {source_db_root}")
 
     output_root = (ROOT_DIR / args.output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+
+    # ---------------- full_plan mode: judge alignment on plan JSON (no actions) ---------------- #
+    if args.mode == "full_plan":
+        ip = Path(args.input_plan_json)
+        if ip.is_dir():
+            plan_inputs = sorted(ip.glob("plan_*.json"))
+        else:
+            plan_inputs = [ip]
+        if not plan_inputs:
+            parser.error(f"No plan_*.json found under {ip}")
+
+        manifest_path = output_root / "experiment_manifest.json"
+        manifest_payload = {
+            "mode": "full_plan",
+            "input_plan_json": str(ip),
+            "runs": args.runs,
+            "max_turns": args.max_turns,
+            "parallelism": args.parallelism,
+            "output_root": str(output_root),
+            "plans": [str(p) for p in plan_inputs],
+        }
+        with manifest_path.open("w", encoding="utf-8") as handle:
+            json.dump(manifest_payload, handle, indent=2, ensure_ascii=False)
+
+        judge_prompt = (
+            args.full_plan_judge_prompt.read_text(encoding="utf-8")
+            if args.full_plan_judge_prompt
+            else DEFAULT_FULL_PLAN_JUDGE_PROMPT
+        )
+        sim_user_prompt = (
+            args.full_plan_sim_user_prompt.read_text(encoding="utf-8")
+            if args.full_plan_sim_user_prompt
+            else DEFAULT_FULL_PLAN_SIM_USER_PROMPT
+        )
+        llm = LLMService()
+        chat_prompt = (
+            args.full_plan_chat_prompt.read_text(encoding="utf-8")
+            if args.full_plan_chat_prompt
+            else DEFAULT_FULL_PLAN_CHAT_PROMPT
+        )
+        eval_dir = output_root / "eval"
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        results_path = eval_dir / "results.csv"
+        import csv
+
+        parallelism = max(1, min(args.parallelism, args.runs)) if args.runs else 1
+        results: List[Dict[str, str]] = []
+        raw_dir = output_root / "run_logs" / "raw"
+        parsed_dir = output_root / "run_logs" / "parsed"
+        sim_user_dir = output_root / "run_logs" / "sim_user"
+        judge_dir = output_root / "run_logs" / "judge"
+        sim_user_raw_dir = sim_user_dir / "raw"
+        sim_user_parsed_dir = sim_user_dir / "parsed"
+        sim_user_raw_dir.mkdir(parents=True, exist_ok=True)
+        sim_user_parsed_dir.mkdir(parents=True, exist_ok=True)
+        judge_dir.mkdir(parents=True, exist_ok=True)
+
+        def _run_full_plan(run_idx: int, base_plan: Path) -> List[Dict[str, str]]:
+            rows: List[Dict[str, str]] = []
+            baseline_path = base_plan
+            history_texts: List[str] = []
+            for turn_idx in range(1, args.max_turns + 1):
+                history_block = "\n\n".join(history_texts[-10:]) if history_texts else "None"
+                print(f"[INFO] Run {run_idx} Turn {turn_idx} generating simulated user plan from {baseline_path.name}")
+                try:
+                    sim_user_path = _generate_agent_plan(
+                        baseline_path,
+                        run_idx,
+                        turn_idx,
+                        args.goal or "",
+                        llm,
+                        sim_user_prompt,
+                        sim_user_raw_dir,
+                        sim_user_parsed_dir,
+                        history_block,
+                    )
+                except Exception as exc:
+                    print(f"[ERR] Failed to generate simulated user plan run={run_idx} turn={turn_idx}: {exc}")
+                    break
+                print(
+                    f"[INFO] Generated simulated user plan run={run_idx} turn={turn_idx} base={baseline_path.name} -> {sim_user_path.name}"
+                )
+                print(f"[INFO] Run {run_idx} Turn {turn_idx} generating agent plan from simulated user plan")
+                try:
+                    agent_path = _generate_agent_plan(
+                        sim_user_path,
+                        run_idx,
+                        turn_idx,
+                        args.goal or "",
+                        llm,
+                        chat_prompt,
+                        raw_dir,
+                        parsed_dir,
+                        history_block,
+                    )
+                except Exception as exc:
+                    print(f"[ERR] Failed to generate agent plan run={run_idx} turn={turn_idx}: {exc}")
+                    break
+                print(
+                    f"[INFO] Generated agent plan run={run_idx} turn={turn_idx} base={sim_user_path.name} -> {agent_path.name}"
+                )
+                try:
+                    verdict = _judge_full_plan_pair(
+                        sim_user_path, agent_path, args.goal or "", llm, judge_prompt
+                    )
+                except Exception as exc:
+                    print(f"[ERR] Judge failed run={run_idx} turn={turn_idx}: {exc}")
+                    break
+                print(
+                    f"[INFO] Judged run={run_idx} turn={turn_idx} base={sim_user_path.name} agent={agent_path.name} -> {verdict.alignment}"
+                )
+                rows.append({
+                    "run": run_idx,
+                    "turn": turn_idx,
+                    "base_plan_path": str(sim_user_path),
+                    "agent_plan_path": str(agent_path),
+                    "alignment": verdict.alignment,
+                    "reason": verdict.explanation,
+                })
+                # Persist judge verdict
+                try:
+                    judge_out_path = judge_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.json"
+                    judge_out_path.write_text(
+                        json.dumps(
+                            {
+                                "run": run_idx,
+                                "turn": turn_idx,
+                                "base_plan_path": str(baseline_path),
+                                "agent_plan_path": str(agent_path),
+                                "alignment": verdict.alignment,
+                                "reason": verdict.explanation,
+                                "raw_response": verdict.raw_response,
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                except Exception as exc:
+                    print(f"[WARN] Failed to save judge verdict run={run_idx} turn={turn_idx}: {exc}")
+                if verdict.alignment == "misaligned":
+                    print(f"[WARN] Misaligned detected at run={run_idx}, stopping further turns for this run.")
+                    break
+                baseline_path = agent_path
+                try:
+                    history_texts.append(_load_plan_text(agent_path))
+                except Exception:
+                    history_texts.append("")
+            return rows
+
+        # Each run uses a base plan (cycle if fewer plans than runs)
+        run_targets = [
+            (run_idx, plan_inputs[(run_idx - 1) % len(plan_inputs)])
+            for run_idx in range(1, args.runs + 1)
+        ]
+
+        with ThreadPoolExecutor(max_workers=parallelism) as executor:
+            future_map = {
+                executor.submit(_run_full_plan, run_idx, base_plan): run_idx
+                for run_idx, base_plan in run_targets
+            }
+            for future in as_completed(future_map):
+                run_idx = future_map[future]
+                try:
+                    rows = future.result()
+                    results.extend(rows)
+                except Exception as exc:
+                    print(f"[ERR] Run {run_idx} failed: {exc}")
+
+        with results_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([
+                "run",
+                "turn",
+                "base_plan_path",
+                "agent_plan_path",
+                "alignment",
+                "reason",
+            ])
+            for row in results:
+                writer.writerow([
+                    row["run"],
+                    row["turn"],
+                    row["base_plan_path"],
+                    row["agent_plan_path"],
+                    row["alignment"],
+                    row["reason"],
+                ])
+        print(f"[INFO] Full-plan judging completed. Results: {results_path}")
+        return
+
+    # ---------------- action mode: existing simulation flow ---------------- #
     db_template_dir = output_root / "db_template"
     _copy_tree(source_db_root, db_template_dir)
     plans_dir = db_template_dir / "plans"
@@ -279,6 +718,7 @@ def main() -> None:
 
     manifest_path = output_root / "experiment_manifest.json"
     manifest_payload = {
+        "mode": "action",
         "source_plan_id": args.plan_id,
         "runs": args.runs,
         "parallelism": args.parallelism,
@@ -286,6 +726,10 @@ def main() -> None:
         "goal": args.goal,
         "max_actions_per_turn": args.max_actions_per_turn,
         "enable_execute": args.enable_execute,
+        "disable_web_search": args.disable_web_search,
+        "disable_rerun_task": args.disable_rerun_task,
+        "disable_graph_rag": args.disable_graph_rag,
+        "stop_on_misalignment": not args.no_stop_on_misalignment,
         "output_root": str(output_root),
         "tasks": [
             {
@@ -296,6 +740,10 @@ def main() -> None:
                 "log_path": str(task.log_path),
                 "max_actions_per_turn": args.max_actions_per_turn,
                 "enable_execute": args.enable_execute,
+                "disable_web_search": args.disable_web_search,
+                "disable_rerun_task": args.disable_rerun_task,
+                "disable_graph_rag": args.disable_graph_rag,
+                "stop_on_misalignment": not args.no_stop_on_misalignment,
             }
             for task in tasks
         ],
@@ -321,13 +769,27 @@ def main() -> None:
                 session_logs_dir=session_logs_dir,
                 max_actions_per_turn=args.max_actions_per_turn,
                 enable_execute=args.enable_execute,
+                disable_web_search=args.disable_web_search,
+                disable_rerun_task=args.disable_rerun_task,
+                disable_graph_rag=args.disable_graph_rag,
+                no_stop_on_misalignment=args.no_stop_on_misalignment,
             ): task
             for task in tasks
         }
         for future in as_completed(futures):
             idx, code = future.result()
+            task = futures[future]
+            misaligned_turns = _extract_misaligned_turns(task.log_path)
             results[idx] = code
             status = "OK" if code == 0 else f"ERR({code})"
+            if misaligned_turns:
+                first = misaligned_turns[0]
+                more = (
+                    f" +{len(misaligned_turns) - 1} more"
+                    if len(misaligned_turns) > 1
+                    else ""
+                )
+                status = f"{status} (misaligned turn {first}{more})"
             print(f"[INFO] Simulation #{idx:02d} completed -> {status}")
 
     failed = [idx for idx, code in sorted(results.items()) if code != 0]

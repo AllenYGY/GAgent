@@ -29,6 +29,17 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({ open, onClose }
 
   const memory: Memory = selectedMemory;
 
+  const parseSourceTags = (tags: string[]) => {
+    const sessionTag = tags.find((tag) => tag.startsWith('session:'));
+    const planTag = tags.find((tag) => tag.startsWith('plan:'));
+    return {
+      session: sessionTag ? sessionTag.replace(/^session:/, '') : undefined,
+      plan: planTag ? planTag.replace(/^plan:/, '') : undefined,
+    };
+  };
+
+  const { session, plan } = parseSourceTags(memory.tags || []);
+
   // 获取类型标签样式
   const getMemoryTypeInfo = (type: Memory['memory_type']) => {
     const typeMap = {
@@ -134,6 +145,15 @@ const MemoryDetailDrawer: React.FC<MemoryDetailDrawerProps> = ({ open, onClose }
               {importanceInfo.desc}
             </Text>
           </Descriptions.Item>
+
+          {(session || plan) && (
+            <Descriptions.Item label="来源">
+              <Space size={[4, 4]} wrap>
+                {session && <Tag color="geekblue">Session:{session}</Tag>}
+                {plan && <Tag color="cyan">Plan:{plan}</Tag>}
+              </Space>
+            </Descriptions.Item>
+          )}
 
           <Descriptions.Item label="上下文">
             <Text>{memory.context || 'General'}</Text>
