@@ -40,17 +40,13 @@ def build_simulated_user_prompt(
     turns_text = []
     for turn in previous_turns:
         sim_line = f"Simulated user (you): {turn.simulated_user.message}"
-        action_line = (
-            f"Desired ACTION: {_format_action(turn.simulated_user.desired_action)}"
-        )
         chat_line = f"Chat agent reply: {turn.chat_agent.reply}"
-        chat_actions = _format_chat_actions(turn.chat_agent.actions)
         judge_line = None
         # Only surface judge feedback when misaligned to avoid biasing future turns
         if turn.judge and turn.judge.alignment == "misaligned":
             judge_line = f"Judge verdict (misaligned): {turn.judge.explanation}"
 
-        lines = [sim_line, action_line, chat_line, chat_actions]
+        lines = [sim_line, chat_line]
         if judge_line:
             lines.append(judge_line)
         turns_text.append("\n".join(lines))
@@ -69,6 +65,7 @@ Action catalog (must use these ACTION kinds/names):
 
 Action limit per turn:
 Respond with no more than {max_actions} ACTION intention(s) per turn. Prefer a single, precise ACTION when possible.
+- Do NOT repeat a request already made in previous turns; propose a new action or refinement that adds incremental value.
 
 Current improvement goal:
 {goal_text}

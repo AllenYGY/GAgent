@@ -139,7 +139,7 @@ class SimulationOrchestrator:
         return history[-StructuredChatAgent.MAX_HISTORY :]
 
     async def _run_chat_agent(
-        self, message: str, state: SimulationRunState
+        self, message: str, state: SimulationRunState, turn_index: int
     ):
         history = self._build_history(state)
         session = PlanSession(repo=self.plan_session.repo, plan_id=self.plan_session.plan_id)
@@ -152,6 +152,9 @@ class SimulationOrchestrator:
             "allow_rerun_task": state.config.allow_rerun_task,
             "allow_graph_rag": state.config.allow_graph_rag,
             "allow_show_tasks": state.config.allow_show_tasks,
+            "simulation_run_id": state.run_id,
+            "simulation_turn_index": turn_index,
+            "include_action_summary": False,
         }
         agent = StructuredChatAgent(
             plan_session=session,
@@ -346,21 +349,6 @@ class SimulationOrchestrator:
     ) -> str:
         pending_feedback = [issue for issue in state.alignment_issues if not issue.delivered]
         sections = [base_message]
-        if desired_action is not None and desired_action.parameters:
-            try:
-                params = desired_action.parameters or {}
-                extra_lines: List[str] = []
-                instr = params.get("instruction")
-                if isinstance(instr, str) and instr.strip():
-                    if instr.strip() not in base_message:
-                        extra_lines.append(f"Instruction detail: {instr.strip()}")
-                parent_id = params.get("parent_id")
-                if parent_id is not None and str(parent_id) not in base_message:
-                    extra_lines.append(f"Parent task id: {parent_id}")
-                if extra_lines:
-                    sections.append("\n".join(extra_lines))
-            except Exception:
-                pass
         feedback_lines = [
             f"- Turn {issue.turn_index}: {issue.reason.strip()}"
             for issue in pending_feedback
@@ -401,6 +389,8 @@ class SimulationOrchestrator:
             previous_turns=state.turns,
             max_actions=state.config.max_actions_per_turn,
             allow_execute_actions=state.config.enable_execute_actions,
+            run_id=state.run_id,
+            turn_index=turn_index,
         )
         logger.info(
             "Simulation run %s turn %s user message: %s",
@@ -415,7 +405,7 @@ class SimulationOrchestrator:
         )
         simulated_user_output.message = delivered_message
         agent_result, chat_turn = await self._run_chat_agent(
-            delivered_message, state
+            delivered_message, state, turn_index
         )
         for idx, step in enumerate(agent_result.steps, start=1):
             logger.info(
@@ -434,6 +424,8 @@ class SimulationOrchestrator:
             improvement_goal=goal,
             simulated_user_action=simulated_user_output.desired_action,
             chat_turn=chat_turn,
+            run_id=state.run_id,
+            turn_index=turn_index,
         )
         logger.info(
             "Simulation run %s turn %s judge=%s",

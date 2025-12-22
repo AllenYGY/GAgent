@@ -30,11 +30,10 @@ import numpy as np
 import pandas as pd
 
 DIMENSIONS = [
-    "relevance",
-    "completeness",
+    "contextual_completeness",
     "accuracy",
-    "clarity",
-    "coherence",
+    "task_granularity_atomicity",
+    "reproducibility_parameterization",
     "scientific_rigor",
 ]
 

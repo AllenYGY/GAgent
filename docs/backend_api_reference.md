@@ -6,8 +6,8 @@
 
 | Method & Path | 描述 | 备注 |
 | --- | --- | --- |
-| `POST /chat/message` | 结构化对话入口。接收用户消息、历史与上下文，驱动 `StructuredChatAgent` 执行计划/任务操作。返回助手回复、动作列表以及 `metadata`（含 `tool_results`、`plan_id` 等）。 | LLM 可以在 `actions` 中调用 `plan_operation`/`task_operation`/`context_request`/`tool_operation`（目前支持 `web_search`、`graph_rag`）。当存在阻塞动作时会立即返回 `tracking_id`。 |
-| `GET /chat/actions/{tracking_id}` | 查询异步动作执行状态。 | 响应 `ActionStatusResponse`，会同步返回本轮产生的 `tool_results`。 |
+| `POST /chat/message` | 结构化对话入口。接收用户消息、历史与上下文，驱动 `StructuredChatAgent` 生成动作。返回助手回复、动作列表以及 `metadata`（含 `tool_results`、`plan_id` 等）。 | 当 LLM 返回 `actions` 时，动作将**异步执行**，响应 `metadata.status=pending` 并包含 `tracking_id`；无 `actions` 时同步执行并返回 `metadata.status=completed`。 |
+| `GET /chat/actions/{tracking_id}` | 查询异步动作执行状态。 | 响应 `ActionStatusResponse`，包含 `status`、`actions`、`result` 与本轮 `tool_results`。 |
 | `GET /chat/history/{session_id}` | 返回指定会话的历史消息。 | 支持 `limit`（默认 50），每条消息包含 `metadata` 以便恢复上下文。 |
 | `GET /chat/sessions` | 会话列表，按最近消息时间倒序。 | 响应 `ChatSessionsResponse`，含 `plan_title`、`current_task_*`、`settings.default_search_provider` 以及 `name_source` / `is_user_named`。 |
 | `PATCH /chat/sessions/{session_id}` | 更新会话属性（名称、激活状态、绑定计划/任务、默认 Web 搜索 Provider）。 | 请求体参考 `ChatSessionUpdateRequest`；当携带 `name` 时会自动标记 `is_user_named=true`。 |

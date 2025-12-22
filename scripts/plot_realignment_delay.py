@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 from collections import Counter
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 
 def _collect_delays(run_dir: Path) -> Tuple[Counter[int], List[int], int]:
@@ -38,6 +39,47 @@ def _collect_delays(run_dir: Path) -> Tuple[Counter[int], List[int], int]:
             if delay is not None:
                 counter[delay] += 1
                 raw_delays.append(delay)
+            else:
+                unresolved += 1
+    return counter, raw_delays, unresolved
+
+
+def _collect_delays_from_matrix(csv_path: Path) -> Tuple[Counter[int], List[int], int]:
+    """
+    Given a misalignment matrix (rows=runs, cols=turns, 1=misaligned), compute delays:
+    delay = first turn where misaligned (value 1) to the next turn with value 0.
+    If no misalignment in a run -> ignore. If never recovered -> unresolved +1.
+    """
+    counter: Counter[int] = Counter()
+    raw_delays: List[int] = []
+    unresolved = 0
+    with csv_path.open("r", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        header = next(reader, [])
+        if len(header) < 2:
+            return counter, raw_delays, unresolved
+        turns = header[1:]
+        for row in reader:
+            if len(row) < 2:
+                continue
+            vals = []
+            try:
+                vals = [int(x) for x in row[1:]]
+            except Exception:
+                continue
+            try:
+                first = vals.index(1)
+            except ValueError:
+                continue  # no misalignment in this run
+            # find first 0 after first 1
+            recovery = None
+            for i in range(first + 1, len(vals)):
+                if vals[i] == 0:
+                    recovery = i - first
+                    break
+            if recovery is not None:
+                counter[recovery] += 1
+                raw_delays.append(recovery)
             else:
                 unresolved += 1
     return counter, raw_delays, unresolved
@@ -113,15 +155,26 @@ def _plot(counter: Counter[int], *, output: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot recovery time after misalignment.")
-    parser.add_argument("--run-dir", default="experiments/run_logs", help="Directory with run JSON logs.")
+    parser.add_argument("--run-dir", help="Directory with run JSON logs (action mode).")
+    parser.add_argument("--matrix", help="Misalignment matrix CSV (from plot_misalignment_distribution --matrix-output).")
     parser.add_argument("--output", default="experiments/misalignment_recovery.png", help="Output image path.")
     args = parser.parse_args()
 
-    run_dir = Path(args.run_dir)
-    if not run_dir.exists():
-        parser.error(f"Run directory not found: {run_dir}")
+    counter: Counter[int]
+    delays: List[int]
+    unresolved: int
 
-    counter, delays, unresolved = _collect_delays(run_dir)
+    if args.matrix:
+        csv_path = Path(args.matrix)
+        if not csv_path.exists():
+            parser.error(f"Matrix CSV not found: {csv_path}")
+        counter, delays, unresolved = _collect_delays_from_matrix(csv_path)
+    else:
+        run_dir = Path(args.run_dir or "experiments/run_logs")
+        if not run_dir.exists():
+            parser.error(f"Run directory not found: {run_dir}")
+        counter, delays, unresolved = _collect_delays(run_dir)
+
     if not delays and unresolved == 0:
         print("[WARN] No recoveries detected (either no misalignments or never realigned).")
         return

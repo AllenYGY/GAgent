@@ -1,433 +1,189 @@
-# Memory-MCP 智能记忆系统
+# Memory MCP 系统说明（更新版）
 
-## 概述
+本文档说明当前 Memory-MCP 系统的能力、接口与数据流，内容与 `app/api/memory_api.py`、`app/services/memory/memory_service.py` 等实现一致。
 
-Memory-MCP是一个集成到项目中的智能记忆管理系统，提供MCP（Model Context Protocol）兼容的记忆存储、检索和管理功能。该系统复用现有的GLM嵌入向量服务和数据库基础设施，实现高效的语义记忆搜索和智能记忆进化。
+## 1) 系统概述
 
-## 核心特性
+Memory-MCP 提供可检索、可进化的记忆库，支持 MCP 风格接口。其核心能力包括：
 
-### 🧠 智能记忆管理
+- 自动抽取关键词 / 标签 / 上下文（由 LLM 完成）
+- 语义检索 + 回退全文检索
+- 记忆进化与关联（定期自动连接）
+- 会话隔离存储（按 session_id 进入独立数据库）
 
-- **自动内容分析**: 使用LLM自动提取关键词、上下文和标签
-- **多类型记忆**: 支持对话、经验、知识、上下文四种记忆类型
-- **重要性分级**: 从临时到关键的五级重要性管理
+## 2) 记忆模型
 
-### 🔍 语义搜索
+### 2.1 记忆类型（MemoryType）
 
-- **GLM嵌入向量**: 基于现有嵌入向量服务的语义相似度搜索
-- **混合检索**: 语义搜索+文本搜索的双重保障
-- **相似度阈值**: 可配置的最小相似度过滤
+当前支持：
 
-### 🔗 记忆进化
+- `conversation`
+- `experience`
+- `knowledge`
+- `context`
+- `task_output`（扩展）
+- `evaluation`（扩展）
 
-- **自动连接发现**: 基于语义相似度自动建立记忆间连接
-- **定期进化**: 每10个记忆触发一次进化优化
-- **关系网络**: 构建记忆知识图谱
+### 2.2 重要性（ImportanceLevel）
 
-## 与系统的集成方式
+- `critical` / `high` / `medium` / `low` / `temporary`
 
-面向后端的交互流程
+## 3) 接口列表（/mcp 前缀）
 
-1. **统一的 HTTP/MCP 接口**  
-   - 所有客户端（Web 前端、外部 MCP 客户端、其他服务）都通过 `/mcp/save_memory`、`/mcp/query_memory`、`/mcp/memory/stats` 和 `/mcp/memory/auto_save_task` 四个路由与系统交互，详见 `app/api/memory_api.py`。  
-   - FastAPI 路由把 JSON 请求转换为 `SaveMemoryRequest` / `QueryMemoryRequest` 数据模型后，调用单例 `IntegratedMemoryService` 并将响应重新包装为 MCP 兼容格式（统一的 `context_id`、`meta` 字段等），确保内部实现细节对调用方透明。
+### 3.1 保存记忆
 
-2. **服务内部依赖**（`app/services/memory/memory_service.py`）  
-   - **LLM 元数据分析**：缺省情况下会调 `get_default_client()` 自动抽取关键词、上下文、标签，在 `_analyze_content` 中完成，保证所有记忆条目都有结构化描述。  
-   - **嵌入向量生成**：调用 `get_embeddings_service()`（封装了 GLM API）为每条记忆生成语义向量，存入 `memory_embeddings` 表，供后续语义检索使用。  
-   - **数据库持久化**：通过 `get_db()` 写入 `memories` / `memory_embeddings` 表，并维护检索次数、连接关系等字段。  
-   - **进化与自动连接**：每次 `save_memory` 后会触发 `_process_memory_evolution`，定期运行 `_evolve_memories` 并调用 `_find_memory_connections` 自动为新记忆建立关联。
+`POST /mcp/save_memory`
 
-3. **前端与聊天工作流**  
-   - 聊天面板在开启记忆模式时会在 `sendMessage` 之前调用 `/mcp/query_memory`，将相似度最高的若干条记忆拼接成 RAG 上下文，再把扩展后的内容发送给聊天后端（`web-ui/src/store/chat.ts`）。  
-   - 用户可以直接点击“Save to memory”或在 Memory 页面手动调用 `/mcp/save_memory`，前端使用 `memoryApi`（`web-ui/src/api/memory.ts`）封装所有请求，并在 Memory 页展示 `/mcp/memory/stats` 与检索结果。  
-   - 当任务/计划执行器完成某个任务后，可 POST `/mcp/memory/auto_save_task` 将任务输出归档为 “experience” 记忆，形成「任务 → 记忆 → 后续检索」的闭环。
+请求体（支持 session_id / plan_id / tags / keywords / context）：
 
-4. **运行时行为概览**  
-   - **保存**：调用者 → HTTP 接口 → `IntegratedMemoryService` → （LLM 生成元数据）→ 嵌入服务 → SQLite → 返回上下文字段。若嵌入失败，仍会保底存文本并允许后续 LIKE 查询。  
-   - **查询**：调用者 → HTTP 接口 → 服务生成查询向量 → 进行余弦相似度检索（失败则回退到全文检索）→ 返回带相似度、元数据的记忆列表。  
-   - **统计与进化**：`get_memory_stats` 聚合数据库指标；进化逻辑在保存流程中异步触发，更新链接、标签与演化计数。
-
-通过上述耦合方式，Memory 模块既保持 MCP 兼容的外部 API，又充分复用了系统现有的 LLM、嵌入、数据库与任务执行能力；任何新的代理或 UI 组件只需复用 `/mcp/*` 接口即可获得统一的记忆读写体验。
-
-## API 接口
-
-### 基础端点
-
-所有Memory-MCP接口都在 `/mcp` 路径下：
-
-```bash
-# 基础URL
-http://localhost:9000/mcp
-```
-
-### 1. 保存记忆
-
-**端点**: `POST /mcp/save_memory`
-
-**请求格式**:
 ```json
 {
-    "content": "记忆内容",
-    "memory_type": "conversation|experience|knowledge|context",
-    "importance": "critical|high|medium|low|temporary",
-    "tags": ["标签1", "标签2"],
-    "related_task_id": 123,
-    "keywords": ["关键词1", "关键词2"],
-    "context": "上下文描述"
+  "content": "记忆内容",
+  "memory_type": "experience",
+  "importance": "medium",
+  "tags": ["tag1", "tag2"],
+  "keywords": ["kw1", "kw2"],
+  "context": "上下文描述",
+  "related_task_id": 123,
+  "session_id": "session_abc",
+  "plan_id": 41
 }
 ```
 
-**响应格式**:
+响应（MCP 兼容格式）：
+
 ```json
 {
-    "context_id": "task_123_experience",
-    "task_id": 123,
-    "memory_type": "experience",
-    "content": "记忆内容",
-    "created_at": "2025-01-01T12:00:00",
-    "embedding_generated": true,
-    "meta": {
-        "importance": "medium",
-        "tags": ["标签1", "标签2"],
-        "agentic_keywords": ["关键词1", "关键词2"],
-        "agentic_context": "上下文描述"
+  "context_id": "task_123_experience",
+  "task_id": 123,
+  "memory_type": "experience",
+  "content": "记忆内容",
+  "created_at": "2025-01-01T12:00:00",
+  "embedding_generated": true,
+  "meta": {
+    "importance": "medium",
+    "tags": ["tag1"],
+    "agentic_keywords": ["kw1"],
+    "agentic_context": "上下文描述"
+  }
+}
+```
+
+### 3.2 查询记忆
+
+`POST /mcp/query_memory`
+
+请求体（支持 session_id / plan_id / include_task_context）：
+
+```json
+{
+  "search_text": "query text",
+  "memory_types": ["conversation", "experience"],
+  "limit": 10,
+  "min_similarity": 0.6,
+  "include_task_context": false,
+  "session_id": "session_abc",
+  "plan_id": 41
+}
+```
+
+响应：
+
+```json
+{
+  "memories": [
+    {
+      "memory_id": "uuid",
+      "task_id": 123,
+      "memory_type": "experience",
+      "content": "记忆内容",
+      "similarity": 0.85,
+      "created_at": "2025-01-01T12:00:00",
+      "meta": {
+        "importance": "high",
+        "tags": ["tag1"],
+        "agentic_keywords": ["kw1"],
+        "agentic_context": "上下文"
+      }
     }
+  ],
+  "total": 1,
+  "search_time_ms": 45.2
 }
 ```
 
-### 2. 查询记忆
+### 3.3 统计信息
 
-**端点**: `POST /mcp/query_memory`
+`GET /mcp/memory/stats`
 
-**请求格式**:
+返回 `MemoryStats`：总量、类型分布、重要性分布、进化次数、嵌入覆盖率等。
+
+### 3.4 MCP 工具列表
+
+`GET /mcp/tools`  
+返回 `save_memory` / `query_memory` 的 MCP 工具描述。
+
+### 3.5 自动保存任务输出
+
+`POST /mcp/memory/auto_save_task`
+
 ```json
 {
-    "search_text": "搜索内容",
-    "memory_types": ["conversation", "experience"],
-    "limit": 10,
-    "min_similarity": 0.6
+  "task_id": 123,
+  "task_name": "任务名称",
+  "content": "任务输出"
 }
 ```
 
-**响应格式**:
-```json
-{
-    "memories": [
-        {
-            "task_id": 123,
-            "memory_type": "experience",
-            "content": "记忆内容",
-            "similarity": 0.85,
-            "created_at": "2025-01-01T12:00:00",
-            "meta": {
-                "importance": "medium",
-                "tags": ["标签1"],
-                "agentic_keywords": ["关键词"],
-                "agentic_context": "上下文"
-            }
-        }
-    ],
-    "total": 1,
-    "search_time_ms": 45.2
-}
-```
+### 3.6 记忆钩子（auto-save）
 
-### 3. 获取统计信息
+- `GET /mcp/memory/hooks/stats`：钩子统计
+- `POST /mcp/memory/hooks/enable`：启用
+- `POST /mcp/memory/hooks/disable`：禁用
+- `POST /mcp/memory/chat/save`：保存聊天消息为记忆（带自动重要性判断）
 
-**端点**: `GET /mcp/memory/stats`
+## 4) 数据存储与隔离
 
-**响应格式**:
-```json
-{
-    "total_memories": 150,
-    "memory_type_distribution": {
-        "conversation": 60,
-        "experience": 45,
-        "knowledge": 30,
-        "context": 15
-    },
-    "importance_distribution": {
-        "critical": 5,
-        "high": 25,
-        "medium": 80,
-        "low": 35,
-        "temporary": 5
-    },
-    "average_connections": 2.3,
-    "embedding_coverage": 0.95,
-    "evolution_count": 15
-}
-```
+Memory 模块使用 SQLite：
 
-### 4. 自动保存任务记忆
+- 有 `session_id` 时：写入 `data/databases/sessions/session_<id>.sqlite`
+- 无 `session_id` 时：写入主库
 
-**端点**: `POST /mcp/memory/auto_save_task`
+表结构（简化）：
 
-**请求格式**:
-```json
-{
-    "task_id": 123,
-    "task_name": "任务名称",
-    "content": "任务输出内容"
-}
-```
+- `memories`：记忆主表
+- `memory_embeddings`：向量表
+- `tasks`：轻量 tasks 表（外键占位）
 
-## 使用示例
+详细字段可参考 `docs/Database_Schema_Overview.md`。
 
-### Python 客户端示例
+## 5) 执行流程
 
-```python
-import requests
-import json
+1. 接口接收请求 → `IntegratedMemoryService.save_memory`  
+2. LLM 抽取关键词、标签、上下文（若调用可用）  
+3. 生成嵌入向量（若嵌入服务可用）  
+4. 写入 SQLite  
+5. 返回 MCP 兼容格式  
 
-# 基础配置
-BASE_URL = "http://localhost:9000/mcp"
+查询流程：
 
-# 保存记忆
-def save_memory(content, memory_type="experience", importance="medium"):
-    response = requests.post(f"{BASE_URL}/save_memory", json={
-        "content": content,
-        "memory_type": memory_type,
-        "importance": importance,
-        "tags": ["auto_generated"]
-    })
-    return response.json()
+1. 语义检索（嵌入向量）
+2. 若向量不可用则回退全文检索
 
-# 查询记忆
-def query_memory(search_text, limit=5):
-    response = requests.post(f"{BASE_URL}/query_memory", json={
-        "search_text": search_text,
-        "limit": limit,
-        "min_similarity": 0.6
-    })
-    return response.json()
+## 6) 常见问题
 
-# 使用示例
-if __name__ == "__main__":
-    # 保存一个经验记忆
-    result = save_memory(
-        "成功实现了GLM嵌入向量的批量处理优化，性能提升了3倍",
-        memory_type="experience",
-        importance="high"
-    )
-    print(f"保存成功: {result['context_id']}")
-    
-    # 查询相关记忆
-    memories = query_memory("GLM嵌入向量优化")
-    print(f"找到 {memories['total']} 条相关记忆")
-    for memory in memories['memories']:
-        print(f"- {memory['content'][:50]}... (相似度: {memory['similarity']:.2f})")
-```
+**嵌入失败 / 查询无结果**
 
-### CLI 命令示例
+- 嵌入服务不可用时，仍可通过全文检索返回结果
+- 若全无结果，请检查是否写入了 session 对应库
 
-```bash
-# 通过API保存记忆
-curl -X POST http://localhost:9000/mcp/save_memory \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "项目重构完成，所有测试通过",
-    "memory_type": "experience",
-    "importance": "high",
-    "tags": ["重构", "测试"]
-  }'
+**为什么 session_id 会影响可见记忆？**
 
-# 查询记忆
-curl -X POST http://localhost:9000/mcp/query_memory \
-  -H "Content-Type: application/json" \
-  -d '{
-    "search_text": "重构",
-    "limit": 5,
-    "min_similarity": 0.7
-  }'
+- session 级记忆隔离用于避免不同会话交叉污染。如需跨会话共享，使用 `session_id = null` 或统一 session。
 
-# 获取统计信息
-curl http://localhost:9000/mcp/memory/stats
-```
+## 7) 参考实现
 
-## 数据库架构
-
-### 记忆主表 (memories)
-
-```sql
-CREATE TABLE memories (
-    id TEXT PRIMARY KEY,                    -- UUID记忆ID
-    content TEXT NOT NULL,                  -- 记忆内容
-    memory_type TEXT NOT NULL,              -- 记忆类型
-    importance TEXT NOT NULL,               -- 重要性级别
-    keywords TEXT,                          -- 关键词(JSON数组)
-    context TEXT DEFAULT 'General',         -- 上下文
-    tags TEXT,                             -- 标签(JSON数组)
-    related_task_id INTEGER,               -- 关联任务ID
-    links TEXT,                            -- 记忆连接(JSON数组)
-    created_at TIMESTAMP,                  -- 创建时间
-    last_accessed TIMESTAMP,               -- 最后访问时间
-    retrieval_count INTEGER DEFAULT 0,     -- 检索次数
-    evolution_history TEXT,                -- 进化历史
-    embedding_generated BOOLEAN DEFAULT FALSE, -- 是否生成嵌入向量
-    embedding_model TEXT                   -- 嵌入模型名称
-);
-```
-
-### 嵌入向量表 (memory_embeddings)
-
-```sql
-CREATE TABLE memory_embeddings (
-    memory_id TEXT PRIMARY KEY,            -- 记忆ID
-    embedding_vector TEXT NOT NULL,        -- 嵌入向量(JSON)
-    embedding_model TEXT DEFAULT 'embedding-2', -- 模型名称
-    created_at TIMESTAMP,                  -- 创建时间
-    updated_at TIMESTAMP                   -- 更新时间
-);
-```
-
-## 配置选项
-
-### 环境变量
-
-```bash
-# 记忆进化阈值（每N个记忆触发一次进化）
-MEMORY_EVOLUTION_THRESHOLD=10
-
-# 默认相似度阈值
-MEMORY_DEFAULT_SIMILARITY=0.6
-
-# 最大记忆连接数
-MEMORY_MAX_CONNECTIONS=3
-```
-
-### 记忆类型说明
-
-- **conversation**: 对话记忆，存储重要的对话内容
-- **experience**: 经验记忆，存储操作经验和学习成果
-- **knowledge**: 知识记忆，存储领域知识和概念
-- **context**: 上下文记忆，存储环境和背景信息
-
-### 重要性级别
-
-- **critical**: 关键记忆，永久保存
-- **high**: 高重要性，长期保存
-- **medium**: 中等重要性，定期清理
-- **low**: 低重要性，短期保存
-- **temporary**: 临时记忆，自动清理
-
-## 最佳实践
-
-### 1. 记忆保存策略
-
-```python
-# 根据内容类型选择合适的记忆类型和重要性
-def smart_save_memory(content, context_type="general"):
-    if "错误" in content or "失败" in content:
-        memory_type = "experience"
-        importance = "high"
-        tags = ["错误处理", "经验"]
-    elif "成功" in content or "完成" in content:
-        memory_type = "experience" 
-        importance = "medium"
-        tags = ["成功案例"]
-    else:
-        memory_type = "knowledge"
-        importance = "medium"
-        tags = ["信息"]
-    
-    return save_memory(content, memory_type, importance, tags)
-```
-
-### 2. 查询优化
-
-```python
-# 使用分层查询策略
-def smart_query(search_text):
-    # 首先高相似度精确查询
-    high_quality = query_memory(search_text, min_similarity=0.8, limit=3)
-    
-    # 如果结果不足，降低阈值扩大搜索
-    if len(high_quality['memories']) < 3:
-        broader_search = query_memory(search_text, min_similarity=0.6, limit=10)
-        return broader_search
-    
-    return high_quality
-```
-
-### 3. 记忆维护
-
-```bash
-# 定期清理临时记忆
-conda run -n LLM python -c "
-from app.services.memory.memory_service import get_memory_service
-import asyncio
-service = get_memory_service()
-# 清理7天前的临时记忆
-asyncio.run(service.cleanup_temporary_memories(days=7))
-"
-
-# 查看记忆统计
-conda run -n LLM python -c "
-from app.services.memory.memory_service import get_memory_service
-import asyncio
-service = get_memory_service()
-stats = asyncio.run(service.get_memory_stats())
-print(f'总记忆数: {stats.total_memories}')
-print(f'嵌入覆盖率: {stats.embedding_coverage:.2%}')
-"
-```
-
-## 故障排除
-
-### 常见问题
-
-**1. 嵌入向量生成失败**
-```bash
-# 检查嵌入服务状态
-conda run -n LLM python -c "
-from app.services.embeddings import get_embeddings_service
-service = get_embeddings_service()
-test_embedding = service.get_single_embedding('测试文本')
-print('嵌入服务正常' if test_embedding else '嵌入服务异常')
-"
-```
-
-**2. 记忆查询无结果**
-```python
-# 检查记忆数据和嵌入向量状态
-def debug_memory_search(search_text):
-    service = get_memory_service()
-    
-    # 检查总记忆数
-    stats = await service.get_memory_stats()
-    print(f"总记忆数: {stats.total_memories}")
-    print(f"嵌入覆盖率: {stats.embedding_coverage:.2%}")
-    
-    # 尝试文本搜索
-    text_results = await service._text_search(search_text, [], [], 5)
-    print(f"文本搜索结果: {len(text_results)} 条")
-    
-    # 尝试语义搜索
-    semantic_results = await service._semantic_search(search_text, [], [], 5, 0.3)
-    print(f"语义搜索结果: {len(semantic_results)} 条")
-```
-
-**3. 记忆进化异常**
-```bash
-# 手动触发记忆进化
-conda run -n LLM python -c "
-from app.services.memory.memory_service import get_memory_service
-import asyncio
-service = get_memory_service()
-asyncio.run(service._evolve_memories())
-print('记忆进化完成')
-"
-```
-
-## 集成说明
-
-Memory-MCP系统完全集成到现有架构中：
-
-- **复用GLM嵌入服务**: 使用 `app.services.embeddings`
-- **复用数据库连接**: 使用 `app.database.get_db()`
-- **复用LLM客户端**: 使用 `app.llm.get_default_client()`
-- **API路由集成**: 通过FastAPI路由器集成到主应用
-
-这确保了系统的一致性和资源的高效利用。
+- API 路由：`app/api/memory_api.py`
+- 核心服务：`app/services/memory/memory_service.py`
+- 记忆钩子：`app/services/memory/memory_hooks.py`
+- 聊天自动记忆：`app/services/memory/chat_memory_middleware.py`

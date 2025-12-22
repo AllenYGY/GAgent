@@ -37,34 +37,47 @@ from app.services.plans.plan_models import PlanTree
 
 DIMENSIONS: List[Dict[str, str]] = [
     {
-        "key": "relevance",
-        "label": "Relevance",
-        "desc": "Alignment with the requested topic and goal.",
-    },
-    {
-        "key": "completeness",
-        "label": "Completeness",
-        "desc": "Coverage of the full scope with necessary subtasks.",
+        "key": "contextual_completeness",
+        "label": "Contextual Completeness",
+        "desc": (
+            "The availability of rationale or context fields that explain why "
+            "a step is being performed. Missing context reduces interpretability "
+            "and should lower the score."
+        ),
     },
     {
         "key": "accuracy",
         "label": "Accuracy",
-        "desc": "Scientific/factual correctness and realistic methods.",
+        "desc": (
+            "Methods, tools, and assumptions are technically correct, current, "
+            "and feasible for the stated constraints. No contradictions or "
+            "hallucinated facts."
+        ),
     },
     {
-        "key": "clarity",
-        "label": "Clarity",
-        "desc": "How clear, actionable, and unambiguous the plan is.",
+        "key": "task_granularity_atomicity",
+        "label": "Task Granularity & Atomicity",
+        "desc": (
+            "Measures whether tasks are broken down into single, unambiguous "
+            "executable actions rather than broad goals. Higher granularity "
+            "reduces ambiguity for execution."
+        ),
     },
     {
-        "key": "coherence",
-        "label": "Coherence",
-        "desc": "Logical ordering, dependencies, and consistency.",
+        "key": "reproducibility_parameterization",
+        "label": "Reproducibility & Parameterization",
+        "desc": (
+            "The extent to which the plan specifies how to run tools (parameters, "
+            "standards, formats), not just which tools to use."
+        ),
     },
     {
         "key": "scientific_rigor",
         "label": "Scientific Rigor",
-        "desc": "Evidence-based reasoning and rigorous methodology.",
+        "desc": (
+            "Includes evaluation metrics, controls/baselines, data-quality checks, "
+            "and reproducibility steps (e.g., documentation, validation, error analysis)."
+        ),
     },
 ]
 
@@ -437,6 +450,8 @@ def validate_response(
     for dim in DIMENSIONS:
         key = dim["key"]
         value = scores.get(key)
+        if value is None:
+            return None
         try:
             value = int(value)
         except Exception:
@@ -453,7 +468,8 @@ def validate_response(
     else:
         comments = comments.strip()
     try:
-        plan_id = int(data.get("plan_id", plan.plan_id))
+        raw_pid = data.get("plan_id", plan.plan_id)
+        plan_id = int(raw_pid) if raw_pid is not None else plan.plan_id
     except Exception:
         plan_id = plan.plan_id
     if plan_id != plan.plan_id:
@@ -480,8 +496,16 @@ async def score_plan(
     service: LLMService,
     *,
     args: argparse.Namespace,
+    prompt_dir: Optional[Path] = None,
 ) -> EvaluationRecord:
     prompt = build_prompt(plan, max_nodes=args.outline_max_nodes)
+    if prompt_dir:
+        try:
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            out_path = prompt_dir / f"plan_{plan.plan_id}.txt"
+            out_path.write_text(prompt, encoding="utf-8")
+        except Exception:
+            pass
     last_error: Optional[str] = None
     attempts = max(1, args.max_retries)
     for attempt in range(1, attempts + 1):
@@ -512,6 +536,7 @@ async def evaluate_plans_async(
     service: LLMService,
     provider_label: Optional[str] = None,
     model_label: Optional[str] = None,
+    prompt_dir: Optional[Path] = None,
 ) -> List[EvaluationRecord]:
     semaphore = asyncio.Semaphore(max(1, args.batch_size))
     records: List[Optional[EvaluationRecord]] = [None] * len(plans)
@@ -525,7 +550,12 @@ async def evaluate_plans_async(
                 f"[INFO] [{label}/{model}] Evaluating plan #{plan.plan_id}: {plan.title}"
             )
             try:
-                records[index] = await score_plan(plan, service, args=args)
+                records[index] = await score_plan(
+                    plan,
+                    service,
+                    args=args,
+                    prompt_dir=prompt_dir,
+                )
             except Exception as exc:
                 failures.append(f"Plan #{plan.plan_id}: {exc}")
 
@@ -568,6 +598,21 @@ def write_outputs(
         for record in records:
             handle.write(json.dumps(record.raw, ensure_ascii=False) + "\n")
     print(f"[INFO] Wrote {len(records)} evaluations to {output_path} and {jsonl_path}")
+
+
+def print_averages(records: List[EvaluationRecord]) -> None:
+    if not records:
+        print("[WARN] No records to summarize averages.")
+        return
+    metrics = [dim["key"] for dim in DIMENSIONS]
+    totals = {m: 0 for m in metrics}
+    n = len(records)
+    for rec in records:
+        for m in metrics:
+            totals[m] += rec.scores.get(m, 0)
+    avgs = {m: round(totals[m] / n, 3) for m in metrics}
+    line = " / ".join(f"{m}={avgs[m]}" for m in metrics)
+    print(f"[INFO] Average scores over {n} plans: {line}")
 
 
 # --- Entrypoint ---------------------------------------------------------------
@@ -626,6 +671,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
 
         service = LLMService(llm_client)
+        # Place prompts alongside outputs, under the output directory
+        prompt_dir = (args.output.parent / "Prompts") if args.output else Path("results/Prompts")
         try:
             records = asyncio.run(
                 evaluate_plans_async(
@@ -634,6 +681,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     service,
                     provider_label=provider_name,
                     model_label=llm_client.model,
+                    prompt_dir=prompt_dir,
                 )
             )
         except Exception as exc:
@@ -650,6 +698,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             else args.jsonl_output
         )
         write_outputs(records, output_path, jsonl_path)
+        print_averages(records)
         return provider_name, True, None
 
     max_workers = args.provider_workers or min(len(target_providers), 4)

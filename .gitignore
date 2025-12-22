@@ -16,3 +16,5 @@ docs/plans/*
 experiments/*
 experiments-*/*
 bulk_plans.csv
+scripts/*
+

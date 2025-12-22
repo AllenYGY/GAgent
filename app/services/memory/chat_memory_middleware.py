@@ -56,8 +56,8 @@ class ChatMemoryMiddleware:
 
         # 保存为记忆（使用LLM判断的类型）
         try:
-            from .memory_service import get_memory_service
             from ...models_memory import SaveMemoryRequest
+            from .memory_service import get_memory_service
 
             memory_service = get_memory_service()
 
@@ -84,13 +84,13 @@ class ChatMemoryMiddleware:
 
             if memory_id:
                 logger.info(
-                    f"💾 聊天消息已保存为记忆 ({memory_type.value}/{importance.value}): {memory_id[:8]}..."
+                    f"Chat message saved as memory ({memory_type.value}/{importance.value}): {memory_id[:8]}..."
                 )
 
             return memory_id
 
         except Exception as e:
-            logger.error(f"保存聊天记忆失败: {e}")
+            logger.error(f"Failed to save chat memory: {e}")
             return None
 
     async def _should_save_message(
@@ -194,9 +194,11 @@ Only return JSON, no other content."""
                 )
 
                 if should_save:
-                    logger.info(f"🤖 LLM判断应保存: {importance_str} - {reason}")
+                    logger.info(
+                        f"LLM judgment should be saved: {importance_str} - {reason}"
+                    )
                 else:
-                    logger.debug(f"🤖 LLM判断不保存: {reason}")
+                    logger.debug(f"LLM judgment should not be saved: {reason}")
 
                 # 成功，直接返回
                 return should_save, importance, memory_type
@@ -204,7 +206,7 @@ Only return JSON, no other content."""
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"⚠️  LLM判断失败 (尝试 {attempt + 1}/{max_retries}): {e}"
+                    f"LLM judgment failed (try {attempt + 1}/{max_retries}): {e}"
                 )
                 # 如果还有重试机会，继续下一次
                 if attempt < max_retries - 1:
@@ -213,7 +215,7 @@ Only return JSON, no other content."""
                 break
 
         # 所有重试都失败
-        logger.error(f"❌ LLM判断失败，已重试{max_retries}次: {last_error}")
+        logger.error(f"LLM judgment failed, retried {max_retries} times: {last_error}")
         return False, ImportanceLevel.LOW, None
 
     async def process_assistant_response(
@@ -238,12 +240,12 @@ Only return JSON, no other content."""
     def enable(self):
         """启用中间件"""
         self.enabled = True
-        logger.info("✅ Chat memory middleware enabled")
+        logger.info("Chat memory middleware enabled")
 
     def disable(self):
         """禁用中间件"""
         self.enabled = False
-        logger.info("⏸️  Chat memory middleware disabled")
+        logger.info("⏸Chat memory middleware disabled")
 
 
 # 全局单例

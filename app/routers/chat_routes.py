@@ -7,16 +7,19 @@ import hashlib
 import inspect
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import get_graph_rag_settings, get_search_settings
 from app.config.decomposer_config import get_decomposer_settings
 from app.config.executor_config import get_executor_settings
+from app.models_memory import QueryMemoryRequest
 from app.repository.chat_action_runs import (
     create_action_run,
     fetch_action_run,
@@ -29,15 +32,14 @@ from app.repository.plan_storage import (
     update_decomposition_job_status,
 )
 from app.services.foundation.settings import get_settings
-from app.services.memory.chat_memory_middleware import get_chat_memory_middleware
-from app.services.memory.memory_service import get_memory_service
-from app.models_memory import QueryMemoryRequest
 from app.services.llm.llm_service import get_llm_service
 from app.services.llm.structured_response import (
     LLMAction,
     LLMStructuredResponse,
     schema_as_json,
 )
+from app.services.memory.chat_memory_middleware import get_chat_memory_middleware
+from app.services.memory.memory_service import get_memory_service
 from app.services.plans.action_catalog import build_action_catalog
 from app.services.plans.action_schema import normalize_action
 from app.services.plans.decomposition_jobs import (
@@ -52,10 +54,7 @@ from app.services.plans.plan_decomposer import DecompositionResult, PlanDecompos
 from app.services.plans.plan_executor import PlanExecutor
 from app.services.plans.plan_models import PlanTree
 from app.services.plans.plan_session import PlanSession
-from app.services.session_title_service import (
-    SessionNotFoundError,
-    SessionTitleService,
-)
+from app.services.session_title_service import SessionNotFoundError, SessionTitleService
 from tool_box import execute_tool
 
 from . import register_router
@@ -178,7 +177,9 @@ class ChatSessionAutoTitleRequest(BaseModel):
     """Request payload for automatic session titling."""
 
     force: bool = False
-    strategy: Optional[str] = Field(default=None, description="Generation strategy (auto/heuristic/plan/llm/etc.)")
+    strategy: Optional[str] = Field(
+        default=None, description="Generation strategy (auto/heuristic/plan/llm/etc.)"
+    )
 
 
 class ChatSessionAutoTitleResult(BaseModel):
@@ -430,7 +431,9 @@ async def bulk_autotitle_chat_sessions(
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Failed to bulk auto-title chat sessions: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to bulk auto-title sessions") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to bulk auto-title sessions"
+        ) from exc
 
     response_items = [
         ChatSessionAutoTitleResult(
@@ -1693,6 +1696,21 @@ class StructuredChatAgent:
         self._include_action_summary = getattr(
             app_settings, "chat_include_action_summary", True
         )
+        self._llm_top_k: Optional[int] = getattr(app_settings, "chat_llm_top_k", None)
+        flag_include = (
+            self.extra_context.get("include_action_summary")
+            if isinstance(self.extra_context, dict)
+            else None
+        )
+        if flag_include is not None:
+            self._include_action_summary = bool(flag_include)
+        flag_top_k = (
+            self.extra_context.get("llm_top_k")
+            if isinstance(self.extra_context, dict)
+            else None
+        )
+        if isinstance(flag_top_k, int):
+            self._llm_top_k = flag_top_k
         flag = self.extra_context.get("enable_execute_actions")
         self.enable_execute_actions = True if flag is None else bool(flag)
 
@@ -1781,7 +1799,7 @@ class StructuredChatAgent:
                         self.plan_session.plan_id,
                         job_id=job_id,
                         status="succeeded" if success else "failed",
-                        finished_at=datetime.now(datetime.UTC),
+                        finished_at=datetime.now(timezone.utc),
                         stats={
                             "step_count": len(steps),
                             "success": success,
@@ -1799,20 +1817,51 @@ class StructuredChatAgent:
         self._current_user_message = user_message
         memory_snippets = await self._fetch_memories(user_message)
         prompt = self._build_prompt(user_message, memory_snippets=memory_snippets)
-        raw = await self.llm_service.chat_async(prompt, force_real=True)
-        cleaned = self._strip_code_fence(raw)
-        structured = LLMStructuredResponse.model_validate_json(cleaned)
+        self._save_prompt(prompt)
+        chat_kwargs: Dict[str, Any] = {"force_real": True}
+        if self._llm_top_k is not None:
+            chat_kwargs["top_k"] = self._llm_top_k
+
+        last_error: Optional[ValidationError] = None
+        structured: Optional[LLMStructuredResponse] = None
+        for attempt in range(2):
+            raw = await self.llm_service.chat_async(prompt, **chat_kwargs)
+            cleaned = self._strip_code_fence(raw)
+            try:
+                structured = LLMStructuredResponse.model_validate_json(cleaned)
+                break
+            except ValidationError as exc:
+                last_error = exc
+                logger.warning(
+                    "LLM JSON validation failed (attempt %d/2): %s",
+                    attempt + 1,
+                    exc,
+                )
+                if attempt == 1:
+                    raise
+                continue
+
+        if structured is None and last_error:
+            # Safety net; should already have raised on second attempt
+            raise last_error
+
+        assert structured is not None
         normalized_actions = []
         invalid_actions: List[str] = []
         for action in structured.actions:
             try:
-                params = normalize_action(action.kind, action.name, action.parameters or {})
+                params = normalize_action(
+                    action.kind, action.name, action.parameters or {}
+                )
                 action.parameters = params
                 # Enforce carrying user-provided instruction for create_task
                 if (
                     action.kind == "task_operation"
                     and action.name == "create_task"
-                    and (not action.parameters or not action.parameters.get("instruction"))
+                    and (
+                        not action.parameters
+                        or not action.parameters.get("instruction")
+                    )
                 ):
                     # Fallback: use the user message verbatim to avoid dropping critical guidance
                     action.parameters["instruction"] = user_message.strip()
@@ -1828,13 +1877,71 @@ class StructuredChatAgent:
             normalized_actions.append(action)
         structured.actions = normalized_actions
         if invalid_actions:
-            logger.debug("Dropped %d invalid action(s): %s", len(invalid_actions), invalid_actions)
+            logger.debug(
+                "Dropped %d invalid action(s): %s",
+                len(invalid_actions),
+                invalid_actions,
+            )
         return structured
+
+    def _save_prompt(self, prompt: str) -> None:
+        """Persist the prompt sent to the chat model for debugging/analysis."""
+        run_id = (
+            self.extra_context.get("simulation_run_id")
+            if isinstance(self.extra_context, dict)
+            else None
+        )
+        turn_index = (
+            self.extra_context.get("simulation_turn_index")
+            if isinstance(self.extra_context, dict)
+            else None
+        )
+        if not run_id or turn_index is None:
+            return
+        try:
+            settings = get_settings()
+            base_dir = Path(
+                os.getenv(
+                    "CHAT_AGENT_PROMPT_OUTPUT_DIR",
+                    getattr(
+                        settings,
+                        "chat_agent_prompt_output_dir",
+                        Path(__file__).resolve().parents[3]
+                        / "data"
+                        / "chat_agent_prompts",
+                    ),
+                )
+            )
+            run_dir = Path(base_dir) / str(run_id)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"turn_{int(turn_index):02d}_prompt.txt"
+            path = run_dir / filename
+            header = [
+                f"Simulation run: {run_id}",
+                f"Turn index    : {turn_index}",
+                "",
+                "Chat agent prompt:",
+                "",
+            ]
+            content = "\n".join(header) + prompt.strip() + "\n"
+            path.write_text(content, encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Failed to save chat agent prompt: %s", exc)
 
     def _build_prompt(self, user_message: str, *, memory_snippets: str = "") -> str:
         plan_bound = self.plan_session.plan_id is not None
         history_text = self._format_history()
-        context_text = json.dumps(self.extra_context, ensure_ascii=False, indent=2)
+        context_text = ""
+        try:
+            if isinstance(self.extra_context, dict):
+                minimal_keys = {}
+                # We intentionally strip verbose simulation extras from the prompt
+                # to reduce prompt length/noise.
+                context_text = json.dumps(minimal_keys, ensure_ascii=False, indent=2)
+            else:
+                context_text = json.dumps({}, ensure_ascii=False, indent=2)
+        except Exception:
+            context_text = ""
         plan_outline = self.plan_session.outline(max_depth=4, max_nodes=60)
         plan_status = self._compose_plan_status(plan_bound)
         plan_catalog = self._compose_plan_catalog(plan_bound)
@@ -1843,10 +1950,6 @@ class StructuredChatAgent:
 
         prompt_parts = [
             "You are an AI assistant that manages research plans represented as task trees.",
-            f"Current mode: {self.mode}",
-            f"Conversation ID: {self.conversation_id or 'N/A'}",
-            f"Session binding: {plan_status}",
-            f"Extra context:\n{context_text}",
             f"History (latest {self.MAX_HISTORY} messages):\n{history_text}",
         ]
         if memory_snippets:
@@ -1952,6 +2055,12 @@ class StructuredChatAgent:
 
     def _compose_guidelines(self, plan_bound: bool) -> str:
         limit = self.extra_context.get("simulation_max_actions")
+        allow_web = True
+        try:
+            if isinstance(self.extra_context, dict):
+                allow_web = bool(self.extra_context.get("allow_web_search", True))
+        except Exception:
+            allow_web = True
         common_rules = [
             "Return only a JSON object that matches the schema above—no code fences or additional commentary.",
             "`llm_reply.message` must be natural language directed to the user.",
@@ -1959,8 +2068,7 @@ class StructuredChatAgent:
             "Use the `kind`/`name` pairs from the action catalog without inventing new values.",
             "Preserve any user-provided identifiers, citations, alert numbers, or source names exactly in both text and action parameters; do not substitute or paraphrase them.",
             "For `task_operation/create_task`, always include `name` (required) and, when relevant, `instruction` and `parent_id`; never emit this action without a `name`.",
-            "If the user supplied `instruction` or other parameters for a create/update request, include them verbatim in the action (do NOT drop the instruction or rewrite the params).",
-            "For `tool_operation/web_search`, when the user provides `query`/`max_results`, use them verbatim—do not add, drop, or rewrite keywords. If you believe filters (e.g., site/year) are needed, first restate the user-supplied query unchanged and ask for confirmation.",
+            "If the user supplies parameters for a create/update request, carry them fully into the action (no dropping or changing critical details). You may add required fields the user omitted.",
             "A `request_subgraph` reply may contain only that action.",
             "Plan nodes do not provide a `priority` field; avoid fabricating it. `status` reflects progress and may be referenced when helpful.",
             "When the user explicitly asks to execute, run, or rerun a task or the plan, include the matching action or explain why it cannot proceed.",
@@ -1974,9 +2082,7 @@ class StructuredChatAgent:
             scenario_rules = [
                 "Verify that dependencies and prerequisite tasks are satisfied before executing a plan or task.",
                 "When the user wants to run the entire plan, call `plan_operation.execute_plan` and provide a summary if appropriate.",
-                "When the user targets a specific task (for example, \"run the first task\" or \"rerun task 42\"), call `task_operation.show_tasks` first if the ID is unclear, then `task_operation.rerun_task` with a concrete `task_id`.",
-                "Use `web_search` or `graph_rag` only when the user explicitly asks for web data or knowledge-graph lookup; otherwise rely on available context or ask clarifying questions.",
-                "When `web_search` is used, craft a clear query and summarize results with sources. If the user supplied concrete keywords/constraints (e.g., phishing, RDP, third-party vendor), include them verbatim in the query—add context after, never drop the user terms. When `graph_rag` is used, describe phage-related insights and cite triples when helpful.",
+                'When the user targets a specific task (for example, "run the first task" or "rerun task 42"), call `task_operation.show_tasks` first if the ID is unclear, then `task_operation.rerun_task` with a concrete `task_id`.',
                 "Before `task_operation.create_task`, check existing tasks under the same parent for identical/similar names; if a matching task already exists, reference it instead of creating a duplicate, or propose updating the existing task.",
                 "For any user request to create/update a task, do not drop required fields. If the user provided an instruction or other parameters, carry them fully into the ACTION parameters (no omission or rewriting).",
                 "After gathering supporting information, continue scheduling or executing the requested plan or tasks—do not stop at preparation only.",
@@ -1986,9 +2092,16 @@ class StructuredChatAgent:
                 "Do not create, modify, or execute tasks while the session is unbound; instead clarify needs via dialogue or tools.",
                 "Feel free to ask follow-up questions, summarize, or retrieve information that helps the user decide whether a plan is needed.",
                 "Invoke `plan_operation` only when the user explicitly requests a plan or provides an existing plan ID.",
-                "Use `web_search` or `graph_rag` only when the user clearly asks for live search or knowledge-graph access; otherwise respond or confirm intent first.",
+            ]
+        web_rules: list[str] = []
+        if allow_web:
+            web_rules = [
+                "Use `web_search` or `graph_rag` only when the user explicitly asks for web data or knowledge-graph lookup; otherwise rely on available context or ask clarifying questions.",
+                "When `web_search` is used, keep the user-supplied query/constraints verbatim; add context after (never drop their terms) and summarize results with sources.",
             ]
         all_rules = common_rules + scenario_rules
+        if web_rules:
+            all_rules += web_rules
         return "\n".join(
             f"{idx}. {rule}" for idx, rule in enumerate(all_rules, start=1)
         )
@@ -2403,7 +2516,9 @@ class StructuredChatAgent:
                         "stats": summary.stats,
                     }
                     if created_count:
-                        message += f" Automatic decomposition produced {created_count} tasks."
+                        message += (
+                            f" Automatic decomposition produced {created_count} tasks."
+                        )
                     else:
                         message += " Automatic decomposition finished without creating new tasks."
             elif self._decomposition_notes:
@@ -2416,7 +2531,11 @@ class StructuredChatAgent:
         if action.name == "list_plans":
             plans = self.plan_session.list_plans()
             details = {"plans": [plan.model_dump() for plan in plans]}
-            message = "Available plans have been listed." if plans else "No plans are currently available."
+            message = (
+                "Available plans have been listed."
+                if plans
+                else "No plans are currently available."
+            )
             return AgentStep(
                 action=action, success=True, message=message, details=details
             )
@@ -2509,17 +2628,36 @@ class StructuredChatAgent:
                         keyword = parts[0].strip().lower()
                         if keyword in {"before", "after"}:
                             if len(parts) < 2 or not parts[1].strip():
-                                raise ValueError("position must follow the format 'before:<task_id>' or 'after:<task_id>'.")
-                            candidate_id = self._coerce_int(parts[1].strip(), f"position {keyword}")
-                            if anchor_task_id is not None and anchor_task_id != candidate_id:
-                                raise ValueError("anchor_task_id does not match the task referenced in position.")
-                            if anchor_position is not None and anchor_position != keyword:
-                                raise ValueError("anchor_position does not match the pattern specified in position.")
+                                raise ValueError(
+                                    "position must follow the format 'before:<task_id>' or 'after:<task_id>'."
+                                )
+                            candidate_id = self._coerce_int(
+                                parts[1].strip(), f"position {keyword}"
+                            )
+                            if (
+                                anchor_task_id is not None
+                                and anchor_task_id != candidate_id
+                            ):
+                                raise ValueError(
+                                    "anchor_task_id does not match the task referenced in position."
+                                )
+                            if (
+                                anchor_position is not None
+                                and anchor_position != keyword
+                            ):
+                                raise ValueError(
+                                    "anchor_position does not match the pattern specified in position."
+                                )
                             anchor_task_id = candidate_id
                             anchor_position = keyword
                         elif keyword in {"first_child", "last_child"}:
-                            if anchor_position is not None and anchor_position != keyword:
-                                raise ValueError("anchor_position does not match the pattern specified in position.")
+                            if (
+                                anchor_position is not None
+                                and anchor_position != keyword
+                            ):
+                                raise ValueError(
+                                    "anchor_position does not match the pattern specified in position."
+                                )
                             anchor_position = keyword
                         else:
                             position = self._coerce_int(position_param, "position")
@@ -2549,9 +2687,13 @@ class StructuredChatAgent:
 
             if insert_before_id is not None and insert_after_id is not None:
                 if insert_before_id == insert_after_id:
-                    raise ValueError("insert_before and insert_after cannot point to the same task.")
+                    raise ValueError(
+                        "insert_before and insert_after cannot point to the same task."
+                    )
                 if insert_after_id not in siblings or insert_before_id not in siblings:
-                    raise ValueError("insert_before / The task referenced by insert_after does not belong to the target parent node.")
+                    raise ValueError(
+                        "insert_before / The task referenced by insert_after does not belong to the target parent node."
+                    )
                 after_idx = siblings.index(insert_after_id)
                 before_idx = siblings.index(insert_before_id)
                 if after_idx > before_idx:
@@ -2560,22 +2702,35 @@ class StructuredChatAgent:
                     insert_after_id,
                     insert_before_id,
                 }:
-                    raise ValueError("anchor_task_id is inconsistent with insert_before/insert_after.")
+                    raise ValueError(
+                        "anchor_task_id is inconsistent with insert_before/insert_after."
+                    )
                 anchor_task_id = insert_after_id
                 anchor_position = "after"
             else:
                 if insert_before_id is not None:
-                    if anchor_task_id is not None and anchor_task_id != insert_before_id:
-                        raise ValueError("anchor_task_id points to a different task than insert_before.")
+                    if (
+                        anchor_task_id is not None
+                        and anchor_task_id != insert_before_id
+                    ):
+                        raise ValueError(
+                            "anchor_task_id points to a different task than insert_before."
+                        )
                     if insert_before_id not in siblings:
-                        raise ValueError("The task referenced by insert_before does not belong to the target parent node.")
+                        raise ValueError(
+                            "The task referenced by insert_before does not belong to the target parent node."
+                        )
                     anchor_task_id = insert_before_id
                     anchor_position = "before"
                 if insert_after_id is not None:
                     if anchor_task_id is not None and anchor_task_id != insert_after_id:
-                        raise ValueError("anchor_task_id points to a different task than insert_after.")
+                        raise ValueError(
+                            "anchor_task_id points to a different task than insert_after."
+                        )
                     if insert_after_id not in siblings:
-                        raise ValueError("The task referenced by insert_after does not belong to the target parent node.")
+                        raise ValueError(
+                            "The task referenced by insert_after does not belong to the target parent node."
+                        )
                     anchor_task_id = insert_after_id
                     anchor_position = "after"
             if anchor_position is not None:
@@ -2618,6 +2773,18 @@ class StructuredChatAgent:
                 else None
             )
             dependencies = self._normalize_dependencies(params.get("dependencies"))
+            if all(
+                v is None
+                for v in [
+                    name,
+                    instruction,
+                    metadata,
+                    dependencies,
+                ]
+            ):
+                raise ValueError(
+                    "update_task requires at least one of name, instruction, metadata, or dependencies."
+                )
             node = self.plan_session.repo.update_task(
                 tree.id,
                 task_id,
@@ -2639,6 +2806,16 @@ class StructuredChatAgent:
             instruction = params.get("instruction")
             if not instruction:
                 raise ValueError("update_task_instruction requires an instruction.")
+            existing = tree.nodes.get(task_id)
+            if (
+                existing
+                and (existing.instruction or "").strip() == str(instruction).strip()
+            ):
+                message = f"Task [{task_id}] instruction is already up to date; no change applied."
+                details = {"task": existing.model_dump()}
+                return AgentStep(
+                    action=action, success=True, message=message, details=details
+                )
             node = self.plan_session.repo.update_task(
                 tree.id,
                 task_id,
@@ -2723,7 +2900,9 @@ class StructuredChatAgent:
 
         if action.name == "decompose_task":
             if self.plan_decomposer is None:
-                raise ValueError("Task decomposition service is not enabled in this environment.")
+                raise ValueError(
+                    "Task decomposition service is not enabled in this environment."
+                )
             if self.decomposer_settings.model is None:
                 raise ValueError("No decomposition model configured; cannot proceed.")
 
@@ -2781,7 +2960,9 @@ class StructuredChatAgent:
                 logger.warning(
                     "Failed to refresh plan tree after decomposition: %s", exc
                 )
-                self._decomposition_errors.append(f"Failed to refresh plan after decomposition: {exc}")
+                self._decomposition_errors.append(
+                    f"Failed to refresh plan after decomposition: {exc}"
+                )
 
             created_count = len(result.created_tasks)
             message = (
@@ -2859,18 +3040,26 @@ class StructuredChatAgent:
                 "Some actions failed; provide more specific parameters or try again later."
             )
         if not structured.actions:
-            base_suggestions.append("Continue describing the tasks or plans you want to handle.")
+            base_suggestions.append(
+                "Continue describing the tasks or plans you want to handle."
+            )
             if self.plan_session.plan_id is None:
                 base_suggestions.append("I can create new plans or list existing ones.")
         else:
-            base_suggestions.append("If you need to execute those actions, supply the required details and confirm.")
+            base_suggestions.append(
+                "If you need to execute those actions, supply the required details and confirm."
+            )
         if structured.actions and structured.actions[0].kind == "context_request":
-            base_suggestions.append("After reviewing the returned subgraph, you may provide the next instruction.")
+            base_suggestions.append(
+                "After reviewing the returned subgraph, you may provide the next instruction."
+            )
         return base_suggestions
 
     def _require_plan_bound(self) -> PlanTree:
         if self.plan_session.plan_id is None:
-            raise ValueError("The session is not bound to any plan, so tasks or context actions cannot be executed.")
+            raise ValueError(
+                "The session is not bound to any plan, so tasks or context actions cannot be executed."
+            )
         try:
             return self.plan_session.ensure()
         except RuntimeError as exc:
@@ -3065,7 +3254,11 @@ class StructuredChatAgent:
             return f"{prefix} finished."
         if tool_name == "graph_rag":
             query = result.get("query") or ""
-            prefix = f"Knowledge-graph search“{query}”" if query else "Knowledge-graph search"
+            prefix = (
+                f"Knowledge-graph search“{query}”"
+                if query
+                else "Knowledge-graph search"
+            )
             if result.get("success") is False:
                 error = result.get("error") or "Execution failed"
                 return f"{prefix} failed: {error}"

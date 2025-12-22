@@ -77,7 +77,9 @@ class PlanTree(BaseModel):
     def rebuild_adjacency(self) -> None:
         """Rebuild adjacency map based on current node parent/position."""
         adjacency: Dict[Optional[int], List[int]] = {}
-        for node in sorted(self.nodes.values(), key=lambda n: (n.parent_id or -1, n.position, n.id)):
+        for node in sorted(
+            self.nodes.values(), key=lambda n: (n.parent_id or -1, n.position, n.id)
+        ):
             adjacency.setdefault(node.parent_id, []).append(node.id)
         self.adjacency = adjacency
 
@@ -88,7 +90,9 @@ class PlanTree(BaseModel):
     ) -> str:
         """Render the plan outline, optionally constrained by depth/node limits."""
 
-        def _render(node_id: int, depth: int, lines: List[str], counter: List[int]) -> None:
+        def _render(
+            node_id: int, depth: int, lines: List[str], counter: List[int]
+        ) -> None:
             if max_depth is not None and depth > max_depth:
                 return
             if max_nodes is not None and counter[0] >= max_nodes:
@@ -97,8 +101,30 @@ class PlanTree(BaseModel):
             indent = "  " * depth
             instruction = (node.instruction or "").strip()
             normalized_instruction = " ".join(instruction.split())
-            detail = f" :: {normalized_instruction}" if normalized_instruction else ""
-            lines.append(f"{indent}- [{node.id}] {node.display_name()}{detail}")
+
+            # header line (status omitted)
+            header = f"{indent}- [{node.id}] {node.display_name()}"
+            lines.append(header)
+            # instruction line
+            if normalized_instruction:
+                lines.append(f"{indent} {normalized_instruction}")
+            # dependency line
+            if node.dependencies:
+                deps = ",".join(str(d) for d in node.dependencies)
+                lines.append(f"{indent}  deps: {deps}")
+            # context
+            if node.context_combined:
+                lines.append(f"{indent}  context: {node.context_combined.strip()}")
+            elif node.context_sections:
+                for sec in node.context_sections[:2]:
+                    title = sec.get("title") or "context section"
+                    content = (sec.get("content") or "").strip()
+                    if content:
+                        lines.append(f"{indent}  context [{title}]: {content}")
+            # execution result
+            if node.execution_result:
+                lines.append(f"{indent}  exec: {str(node.execution_result).strip()}")
+
             counter[0] += 1
             for child_id in self.children_ids(node_id):
                 _render(child_id, depth + 1, lines, counter)
@@ -106,7 +132,15 @@ class PlanTree(BaseModel):
         if self.is_empty():
             return "(plan has no tasks yet)"
 
-        lines: List[str] = [f"Plan #{self.id}: {self.title}"]
+        lines: List[str] = [
+            f"Plan #{self.id}: {self.title}",
+            "Legend:",
+            "  - [id] name",
+            "    instruction (normalized whitespace)",
+            "    deps: dependency_ids (if any)",
+            "    context: context content",
+            "    exec: execution result (if any)",
+        ]
         if self.description:
             lines.append(f"Description: {self.description}")
         counter = [0]
@@ -128,7 +162,9 @@ class PlanTree(BaseModel):
             indent = "  " * depth
             snippet = (node.instruction or "").strip()
             snippet = snippet[:90] + ("..." if snippet and len(snippet) > 90 else "")
-            lines.append(f"{indent}- [{node.id}] {node.display_name()}{f' :: {snippet}' if snippet else ''}")
+            lines.append(
+                f"{indent}- [{node.id}] {node.display_name()}{f' :: {snippet}' if snippet else ''}"
+            )
             if depth >= max_depth:
                 return
             for child_id in self.children_ids(node_id):

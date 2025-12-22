@@ -13,12 +13,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from app.llm import LLMClient
 from app.services.agents.simulation.models import JudgeVerdict
 from app.services.llm.llm_service import LLMService
 
@@ -167,6 +168,9 @@ def _run_single_simulation(
     env["DB_ROOT"] = str(task.db_root)
     env["SIMULATION_RUN_OUTPUT_DIR"] = str(run_logs_dir)
     env["SIMULATION_SESSION_OUTPUT_DIR"] = str(session_logs_dir)
+    env["SIM_USER_PROMPT_OUTPUT_DIR"] = str(run_logs_dir / "sim_user_prompts")
+    env["CHAT_AGENT_PROMPT_OUTPUT_DIR"] = str(run_logs_dir / "chat_agent_prompts")
+    env["JUDGE_PROMPT_OUTPUT_DIR"] = str(run_logs_dir / "judge_prompts")
 
     cmd = [
         sys.executable,
@@ -246,7 +250,7 @@ def _extract_misaligned_turns(log_path: Path) -> List[int]:
 
 # ---------------- full_plan utilities ---------------- #
 DEFAULT_FULL_PLAN_JUDGE_PROMPT = """You are a strict evaluator. Given a user goal and two full plans (baseline and agent), decide if the agent plan aligns with the goal and the baseline intent.
-- Respond ONLY in JSON with fields: alignment (aligned|misaligned|unclear), reason (string).
+- Respond ONLY in JSON with fields: alignment (aligned|misaligned), reason (string).
 - Do not include code fences or extra text.
 
 User goal:
@@ -280,6 +284,7 @@ DEFAULT_FULL_PLAN_SIM_USER_PROMPT = """You are a simulated user refining a plan.
 - Include tasks with fields: id (int), name, instruction, parent_id (null for roots), dependencies (id list), status ("pending"), position (int order).
 - Keep dependencies consistent; parent_id must reference defined tasks or null for roots.
 - Keep depth ≤3 and total tasks ≤30. Focus on clarity and usability rather than aggressive restructuring.
+- Do NOT repeat prior changes; each turn must introduce a new, incremental improvement.
 
 Goal:
 {goal}
@@ -302,6 +307,7 @@ def _judge_full_plan_pair(
     goal: str,
     llm: LLMService,
     prompt_template: str,
+    temperature: Optional[float] = None,
 ) -> JudgeVerdict:
     try:
         prompt = prompt_template.format(
@@ -309,23 +315,27 @@ def _judge_full_plan_pair(
             baseline_plan=_load_plan_text(baseline_plan_path),
             agent_plan=_load_plan_text(agent_plan_path),
         )
-        resp = llm.chat(prompt)
+        chat_kwargs = {}
+        if temperature is not None:
+            chat_kwargs["temperature"] = temperature
+        resp = llm.chat(prompt, **chat_kwargs)
         try:
-            payload = json.loads(resp)
-        except json.JSONDecodeError:
+            payload = json.loads(_strip_code_fences(resp))
+        except Exception:
             return JudgeVerdict(
-                alignment="unclear",
+                alignment="misaligned",
                 explanation="Invalid JSON from judge",
                 raw_response={"raw": resp},
             )
 
         alignment = str(payload.get("alignment") or "").strip().lower()
-        if alignment not in {"aligned", "misaligned", "unclear"}:
-            alignment = "unclear"
         explanation = (
             str(payload.get("reason") or payload.get("explanation") or "").strip()
             or "No explanation provided."
         )
+        if alignment not in {"aligned", "misaligned"}:
+            explanation = f"Coerced to misaligned (judge returned {alignment or 'invalid'}): {explanation}"
+            alignment = "misaligned"
         return JudgeVerdict(
             alignment=alignment,  # type: ignore[arg-type]
             explanation=explanation,
@@ -333,7 +343,7 @@ def _judge_full_plan_pair(
         )
     except Exception as exc:
         return JudgeVerdict(
-            alignment="unclear",
+            alignment="misaligned",
             explanation=f"Judge error: {exc}",
             raw_response={"error": str(exc)},
         )
@@ -373,13 +383,17 @@ def _generate_agent_plan(
     raw_dir: Path,
     parsed_dir: Path,
     history_text: str,
+    temperature: Optional[float] = None,
 ) -> Path:
     prompt = prompt_template.format(
         goal=goal,
         baseline_plan=_load_plan_text(baseline_plan_path),
         history=history_text or "None",
     )
-    raw_resp = llm.chat(prompt)
+    chat_kwargs = {}
+    if temperature is not None:
+        chat_kwargs["temperature"] = temperature
+    raw_resp = llm.chat(prompt, **chat_kwargs)
     raw_dir.mkdir(parents=True, exist_ok=True)
     parsed_dir.mkdir(parents=True, exist_ok=True)
     raw_path = raw_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.txt"
@@ -417,6 +431,31 @@ def main() -> None:
         "--parallelism", type=int, default=5, help="Maximum concurrent simulations."
     )
     parser.add_argument(
+        "--provider",
+        type=str,
+        help="Override LLM provider (e.g., qwen, deepseek, glm, doubao, moonshot, gemini...).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="Override LLM model name for the chosen provider.",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        help="Override API key for ad-hoc provider tests.",
+    )
+    parser.add_argument(
+        "--api-url",
+        type=str,
+        help="Override base URL for the provider (e.g., gateway endpoint).",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        help="Sampling temperature passed to LLM calls (full_plan mode).",
+    )
+    parser.add_argument(
         "--max-turns",
         type=int,
         default=50,
@@ -445,7 +484,7 @@ def main() -> None:
     parser.add_argument(
         "--output-root",
         default="experiments",
-        help="Directory to store experiment artifacts (default experiments).",
+        help="Directory to store experiment artifacts (default: experiments/...).",
     )
     parser.add_argument(
         "--input-plan-json",
@@ -539,7 +578,15 @@ def main() -> None:
             if args.full_plan_sim_user_prompt
             else DEFAULT_FULL_PLAN_SIM_USER_PROMPT
         )
-        llm = LLMService()
+        llm_client: Optional[LLMClient] = None
+        if any([args.provider, args.model, args.api_key, args.api_url]):
+            llm_client = LLMClient(
+                provider=args.provider,
+                api_key=args.api_key,
+                url=args.api_url,
+                model=args.model,
+            )
+        llm = LLMService(client=llm_client)
         chat_prompt = (
             args.full_plan_chat_prompt.read_text(encoding="utf-8")
             if args.full_plan_chat_prompt
@@ -562,57 +609,148 @@ def main() -> None:
         sim_user_parsed_dir.mkdir(parents=True, exist_ok=True)
         judge_dir.mkdir(parents=True, exist_ok=True)
 
+        def _record_failure(
+            run_idx: int,
+            turn_idx: int,
+            base_path: Path,
+            reason: str,
+            rows: List[Dict[str, str]],
+        ) -> None:
+            entry = {
+                "run": run_idx,
+                "turn": turn_idx,
+                "base_plan_path": str(base_path),
+                "agent_plan_path": None,
+                "alignment": "misaligned",
+                "reason": reason,
+            }
+            rows.append(entry)
+            try:
+                judge_out_path = judge_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.json"
+                judge_out_path.write_text(
+                    json.dumps(
+                        {
+                            "run": run_idx,
+                            "turn": turn_idx,
+                            "base_plan_path": str(base_path),
+                            "agent_plan_path": None,
+                            "alignment": "misaligned",
+                            "reason": reason,
+                            "raw_response": {"error": reason},
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception as exc:  # pragma: no cover - best effort
+                print(
+                    f"[WARN] Failed to save judge failure run={run_idx} turn={turn_idx}: {exc}"
+                )
+
         def _run_full_plan(run_idx: int, base_plan: Path) -> List[Dict[str, str]]:
             rows: List[Dict[str, str]] = []
             baseline_path = base_plan
             history_texts: List[str] = []
             for turn_idx in range(1, args.max_turns + 1):
-                history_block = "\n\n".join(history_texts[-10:]) if history_texts else "None"
-                print(f"[INFO] Run {run_idx} Turn {turn_idx} generating simulated user plan from {baseline_path.name}")
+                history_block = (
+                    "\n\n".join(history_texts[-10:]) if history_texts else "None"
+                )
+                print(
+                    f"[INFO] Run {run_idx} Turn {turn_idx} generating simulated user plan from {baseline_path.name}"
+                )
+                def _gen_with_retry(base_path: Path, prompt: str, raw_dir: Path, parsed_dir: Path):
+                    # retry once on generation/parsing errors
+                    last_exc = None
+                    for attempt in (1, 2):
+                        try:
+                            return _generate_agent_plan(
+                                base_path,
+                                run_idx,
+                                turn_idx,
+                                args.goal or "",
+                                llm,
+                                prompt,
+                                raw_dir,
+                                parsed_dir,
+                                history_block,
+                                args.temperature,
+                            )
+                        except Exception as exc:
+                            last_exc = exc
+                            if attempt == 1:
+                                print(
+                                    f"[WARN] Retry sim/agent generation run={run_idx} turn={turn_idx} attempt={attempt} failed: {exc}"
+                                )
+                                continue
+                    raise last_exc
+
                 try:
-                    sim_user_path = _generate_agent_plan(
+                    sim_user_path = _gen_with_retry(
                         baseline_path,
-                        run_idx,
-                        turn_idx,
-                        args.goal or "",
-                        llm,
                         sim_user_prompt,
                         sim_user_raw_dir,
                         sim_user_parsed_dir,
-                        history_block,
                     )
                 except Exception as exc:
-                    print(f"[ERR] Failed to generate simulated user plan run={run_idx} turn={turn_idx}: {exc}")
-                    break
+                    print(
+                        f"[ERR] Failed to generate simulated user plan run={run_idx} turn={turn_idx}: {exc}"
+                    )
+                    _record_failure(
+                        run_idx,
+                        turn_idx,
+                        baseline_path,
+                        f"Sim user generation failed: {exc}",
+                        rows,
+                    )
+                    continue
                 print(
                     f"[INFO] Generated simulated user plan run={run_idx} turn={turn_idx} base={baseline_path.name} -> {sim_user_path.name}"
                 )
-                print(f"[INFO] Run {run_idx} Turn {turn_idx} generating agent plan from simulated user plan")
+                print(
+                    f"[INFO] Run {run_idx} Turn {turn_idx} generating agent plan from simulated user plan"
+                )
                 try:
-                    agent_path = _generate_agent_plan(
+                    agent_path = _gen_with_retry(
                         sim_user_path,
-                        run_idx,
-                        turn_idx,
-                        args.goal or "",
-                        llm,
                         chat_prompt,
                         raw_dir,
                         parsed_dir,
-                        history_block,
                     )
                 except Exception as exc:
-                    print(f"[ERR] Failed to generate agent plan run={run_idx} turn={turn_idx}: {exc}")
-                    break
+                    print(
+                        f"[ERR] Failed to generate agent plan run={run_idx} turn={turn_idx}: {exc}"
+                    )
+                    _record_failure(
+                        run_idx,
+                        turn_idx,
+                        sim_user_path,
+                        f"Agent generation failed: {exc}",
+                        rows,
+                    )
+                    continue
                 print(
                     f"[INFO] Generated agent plan run={run_idx} turn={turn_idx} base={sim_user_path.name} -> {agent_path.name}"
                 )
                 try:
                     verdict = _judge_full_plan_pair(
-                        sim_user_path, agent_path, args.goal or "", llm, judge_prompt
+                        sim_user_path,
+                        agent_path,
+                        args.goal or "",
+                        llm,
+                        judge_prompt,
+                        args.temperature,
                     )
                 except Exception as exc:
                     print(f"[ERR] Judge failed run={run_idx} turn={turn_idx}: {exc}")
-                    break
+                    _record_failure(
+                        run_idx,
+                        turn_idx,
+                        sim_user_path,
+                        f"Judge failed: {exc}",
+                        rows,
+                    )
+                    continue
                 print(
                     f"[INFO] Judged run={run_idx} turn={turn_idx} base={sim_user_path.name} agent={agent_path.name} -> {verdict.alignment}"
                 )
@@ -626,7 +764,9 @@ def main() -> None:
                 })
                 # Persist judge verdict
                 try:
-                    judge_out_path = judge_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.json"
+                    judge_out_path = (
+                        judge_dir / f"run{run_idx:03d}_turn{turn_idx:03d}.json"
+                    )
                     judge_out_path.write_text(
                         json.dumps(
                             {
@@ -644,10 +784,10 @@ def main() -> None:
                         encoding="utf-8",
                     )
                 except Exception as exc:
-                    print(f"[WARN] Failed to save judge verdict run={run_idx} turn={turn_idx}: {exc}")
-                if verdict.alignment == "misaligned":
-                    print(f"[WARN] Misaligned detected at run={run_idx}, stopping further turns for this run.")
-                    break
+                    print(
+                        f"[WARN] Failed to save judge verdict run={run_idx} turn={turn_idx}: {exc}"
+                    )
+                # Continue even if misaligned; use latest agent plan as next baseline
                 baseline_path = agent_path
                 try:
                     history_texts.append(_load_plan_text(agent_path))

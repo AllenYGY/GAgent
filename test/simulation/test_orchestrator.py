@@ -66,7 +66,7 @@ async def test_orchestrator_run_turn(monkeypatch):
         def model_dump(self):
             return {"llm_reply": self.reply, "steps": [step.message for step in self.steps]}
 
-    async def fake_chat(self, message: str, state: SimulationRunState):
+    async def fake_chat(self, message: str, state: SimulationRunState, turn_index: int):
         result = FakeResult()
         turn = ChatAgentTurn(
             reply=result.reply,
@@ -172,7 +172,7 @@ async def test_orchestrator_persists_chat_messages(monkeypatch):
         def model_dump(self):
             return {"reply": self.reply}
 
-    async def fake_chat(self, message: str, state: SimulationRunState):
+    async def fake_chat(self, message: str, state: SimulationRunState, turn_index: int):
         result = FakeResult()
         turn = ChatAgentTurn(
             reply=result.reply,

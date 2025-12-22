@@ -524,6 +524,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         model=args.model,
         timeout=args.timeout,
     )
+    print(f"[INFO] Using provider={client.provider}, model={client.model}, url={client.url}")
+    print(f"[INFO] Loaded {len(topics)} topics from {args.input}")
 
     results: List[PlanResult] = []
     with ThreadPoolExecutor(max_workers=max(1, args.concurrency)) as executor:
@@ -540,7 +542,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             for idx, topic in enumerate(topics, 1)
         }
         for future in as_completed(future_map):
-            results.append(future.result())
+            res = future.result()
+            results.append(res)
+            status = "OK" if res.success else f"FAIL ({res.error})"
+            print(f"[INFO] Topic {res.topic.title} -> {status}")
 
     successes = sum(1 for r in results if r.success)
     failures = len(results) - successes

@@ -8,17 +8,18 @@ import csv
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Dict, Iterable, Tuple
 
 
 def collect_misalignment_turns(
     run_dir: Path,
-) -> Tuple[Counter[int], Counter[int], int, int, int]:
+) -> Tuple[Counter[int], Counter[int], int, int, int, Dict[str, set]]:
     overall: Counter[int] = Counter()
     first_hits: Counter[int] = Counter()
     max_turn_seen = 0
     total_runs = 0
     runs_with_issue = 0
+    run_turns: Dict[str, set] = {}
     for path in sorted(run_dir.glob("*.json")):
         total_runs += 1
         try:
@@ -31,6 +32,13 @@ def collect_misalignment_turns(
         if isinstance(mt, int):
             max_turn_seen = max(max_turn_seen, mt)
         issues = payload.get("alignment_issues", []) or []
+        run_key = (
+            payload.get("run_id")
+            or config.get("session_id")
+            or config.get("plan_id")
+            or path.stem
+        )
+        run_turns.setdefault(str(run_key), set())
         if issues:
             runs_with_issue += 1
         first_seen = False
@@ -38,17 +46,18 @@ def collect_misalignment_turns(
             turn_index = issue.get("turn_index")
             if not isinstance(turn_index, int):
                 continue
+            run_turns[str(run_key)].add(turn_index)
             overall[turn_index] += 1
             if not first_seen:
                 first_hits[turn_index] += 1
                 first_seen = True
             max_turn_seen = max(max_turn_seen, turn_index)
-    return overall, first_hits, max_turn_seen, total_runs, runs_with_issue
+    return overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns
 
 
 def collect_from_results_csv(
     csv_path: Path,
-) -> Tuple[Counter[int], Counter[int], int, int, int]:
+) -> Tuple[Counter[int], Counter[int], int, int, int, Dict[str, set]]:
     """Collect misalignment counts from a results.csv produced by full_plan mode.
 
     Expected columns: run, turn, alignment (aligned|misaligned|unclear).
@@ -60,6 +69,7 @@ def collect_from_results_csv(
     runs_with_issue = 0
     runs_seen = set()
     first_seen_by_run = {}
+    run_turns: Dict[str, set] = {}
 
     with csv_path.open("r", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
@@ -71,8 +81,10 @@ def collect_from_results_csv(
                 continue
             alignment = (row.get("alignment") or "").strip().lower()
             runs_seen.add(run)
+            run_turns.setdefault(str(run), set())
             max_turn_seen = max(max_turn_seen, turn)
             if alignment == "misaligned":
+                run_turns[str(run)].add(turn)
                 overall[turn] += 1
                 if run not in first_seen_by_run:
                     first_hits[turn] += 1
@@ -80,7 +92,7 @@ def collect_from_results_csv(
 
     total_runs = len(runs_seen)
     runs_with_issue = len(first_seen_by_run)
-    return overall, first_hits, max_turn_seen, total_runs, runs_with_issue
+    return overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns
 
 
 def _plot_svg(
@@ -89,12 +101,11 @@ def _plot_svg(
     output_path: Path,
     total_runs: int,
     turns_range: Iterable[int],
-    no_issue_runs: int,
 ) -> None:
     turns = list(turns_range)
-    labels = [str(t) for t in turns] + [f">={turns[-1]}"]
-    counts = [counter.get(t, 0) for t in turns] + [no_issue_runs]
-    max_count = max(counts)
+    labels = [str(t) for t in turns]
+    counts = [counter.get(t, 0) for t in turns]
+    max_count = max(counts) if counts else 0
     width, height = 900, 500
     margin = 60
     chart_width = width - 2 * margin
@@ -143,7 +154,6 @@ def plot_distribution(
     output_path: Path,
     total_runs: int,
     max_turns: int,
-    no_issue_runs: int,
 ) -> Path:
     try:
         import matplotlib.pyplot as plt  # type: ignore
@@ -159,20 +169,17 @@ def plot_distribution(
             output_path=svg_path,
             total_runs=total_runs,
             turns_range=turns_range,
-            no_issue_runs=no_issue_runs,
         )
         return svg_path
 
     turns: Iterable[int] = range(1, max_turns + 1)
-    counts = [counter.get(turn, 0) for turn in turns] + [no_issue_runs]
-    labels = [str(t) for t in turns] + [f">={max_turns}"]
+    counts = [counter.get(turn, 0) for turn in turns]
+    labels = [str(t) for t in turns]
     x = list(range(len(labels)))
     plt.figure(figsize=(max(20, len(labels) * 0.3), 5))
-    width = min(
-        0.6, 25 / max(1, len(labels))
-    )  # auto-adjust bar width to reduce overlap
+    width = min(0.6, 25 / max(1, len(labels)))  # auto-adjust bar width to reduce overlap
     plt.bar(x, counts, color="#3b82f6", alpha=0.9, width=width)
-    plt.xlabel("Turn index (>=max_turns = runs with zero misalignment)")
+    plt.xlabel("Turn index")
     plt.ylabel("Misaligned occurrences")
     plt.title(f"Misaligned turn distribution (runs={total_runs}, issues={sum(counts)})")
     plt.xticks(x, labels)
@@ -206,6 +213,11 @@ def main() -> None:
         type=int,
         help="Optional cap for turn axis; if omitted, uses max_turns from runs or observed turns.",
     )
+    parser.add_argument(
+        "--matrix-output",
+        type=Path,
+        help="Optional CSV to write run x turn misalignment matrix (1=misaligned, 0=else).",
+    )
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -224,11 +236,11 @@ def main() -> None:
         use_csv = True
 
     if use_csv:
-        overall, first_hits, max_turn_seen, total_runs, runs_with_issue = (
+        overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns = (
             collect_from_results_csv(csv_path)
         )
     else:
-        overall, first_hits, max_turn_seen, total_runs, runs_with_issue = (
+        overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns = (
             collect_misalignment_turns(run_dir)
         )
     if total_runs == 0:
@@ -239,7 +251,23 @@ def main() -> None:
     max_turns = args.max_turns or max(max_turn_seen, max(overall) if overall else 0)
     if max_turns <= 0:
         max_turns = 1
-    no_issue_runs = total_runs - runs_with_issue
+    if args.matrix_output:
+        out_path = Path(args.matrix_output)
+        header = ["run"] + [str(t) for t in range(1, max_turns + 1)]
+        def _sort_key(x: str):
+            try:
+                return int(x)
+            except Exception:
+                return x
+        runs_sorted = sorted(run_turns.keys(), key=_sort_key)
+        with out_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            for run_id in runs_sorted:
+                turns = run_turns.get(run_id, set())
+                row = [run_id] + [1 if t in turns else 0 for t in range(1, max_turns + 1)]
+                writer.writerow(row)
+        print(f"[INFO] Saved misalignment matrix to {out_path}")
 
     output_path = Path(args.output)
     if args.first_only:
@@ -251,7 +279,6 @@ def main() -> None:
             output_path=output_path,
             total_runs=total_runs,
             max_turns=max_turns,
-            no_issue_runs=no_issue_runs,
         )
         print(f"[INFO] Saved first-misalignment plot to {saved}")
         for turn in sorted(first_hits):
@@ -263,7 +290,6 @@ def main() -> None:
         output_path=output_path,
         total_runs=total_runs,
         max_turns=max_turns,
-        no_issue_runs=no_issue_runs,
     )
     print(f"[INFO] Saved distribution plot to {saved_overall}")
     for turn in sorted(overall):
@@ -278,7 +304,6 @@ def main() -> None:
             output_path=first_path,
             total_runs=total_runs,
             max_turns=max_turns,
-            no_issue_runs=no_issue_runs,
         )
         print(f"[INFO] Saved first-misalignment plot to {saved_first}")
         for turn in sorted(first_hits):

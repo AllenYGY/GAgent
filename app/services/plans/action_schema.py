@@ -14,19 +14,46 @@ Schema = Dict[str, Dict[str, type]]
 # Minimal schema for actions we expose. Keys are (kind, name).
 ACTION_SCHEMAS: Dict[Tuple[str, str], Schema] = {
     ("tool_operation", "web_search"): {"required": {"query": str}, "optional": {"provider": str, "max_results": int}},
-    ("tool_operation", "graph_rag"): {"required": {"query": str}, "optional": {"top_k": int, "hops": int}},
+    ("tool_operation", "graph_rag"): {
+        "required": {"query": str},
+        "optional": {
+            "top_k": int,
+            "hops": int,
+            "return_subgraph": bool,
+            "focus_entities": str,
+        },
+    },
 
     ("plan_operation", "create_plan"): {"required": {"title": str}, "optional": {"description": str}},
     ("plan_operation", "list_plans"): {"required": {}, "optional": {}},
     ("plan_operation", "delete_plan"): {"required": {"plan_id": int}, "optional": {}},
     ("plan_operation", "execute_plan"): {"required": {}, "optional": {}},
 
-    ("task_operation", "create_task"): {"required": {"name": str}, "optional": {"parent_id": int, "instruction": str}},
-    ("task_operation", "update_task"): {"required": {"task_id": int}, "optional": {"name": str, "instruction": str}},
+    ("task_operation", "create_task"): {
+        "required": {"name": str},
+        "optional": {
+            "parent_id": int,
+            "instruction": str,
+            "metadata": dict,
+            "dependencies": list,
+            "anchor_task_id": int,
+            "anchor_position": str,
+            "position": str,
+            "insert_before": int,
+            "insert_after": int,
+        },
+    },
+    ("task_operation", "update_task"): {
+        "required": {"task_id": int},
+        "optional": {"name": str, "instruction": str, "metadata": dict, "dependencies": list},
+    },
     ("task_operation", "update_task_instruction"): {"required": {"task_id": int, "instruction": str}, "optional": {}},
     ("task_operation", "move_task"): {"required": {"task_id": int}, "optional": {"new_parent_id": int, "new_position": int}},
     ("task_operation", "delete_task"): {"required": {"task_id": int}, "optional": {}},
-    ("task_operation", "decompose_task"): {"required": {}, "optional": {"expand_depth": int, "node_budget": int, "allow_existing_children": bool}},
+    ("task_operation", "decompose_task"): {
+        "required": {},
+        "optional": {"task_id": int, "expand_depth": int, "node_budget": int, "allow_existing_children": bool},
+    },
     ("task_operation", "show_tasks"): {"required": {}, "optional": {}},
     ("task_operation", "query_status"): {"required": {}, "optional": {}},
     ("task_operation", "rerun_task"): {"required": {"task_id": int}, "optional": {}},

@@ -41,9 +41,9 @@ LLM responses must conform to the JSON schema:
 
 | Action        | Kind            | Required parameters             | Optional parameters                         | Notes                                                                 |
 | ------------- | --------------- | --------------------------------| ------------------------------------------- | --------------------------------------------------------------------- |
-| `create_plan` | `plan_operation`| `goal` (string)                 | `title`, `notes`, `sections`, `style`       | Triggers plan generation workflow; typically `blocking: true`.        |
-| `list_plans`  | `plan_operation`| —                               | `session_id`, `workflow_id`                 | Enumerates visible plans.                                             |
-| `execute_plan`| `plan_operation`| `plan_id` (int)                 | —                                           | Marks plan for execution; backend handles scheduling.                 |
+| `create_plan` | `plan_operation`| `title` (string)                | `description`                               | Creates a new plan and binds it.                                      |
+| `list_plans`  | `plan_operation`| —                               | —                                           | Enumerates visible plans.                                             |
+| `execute_plan`| `plan_operation`| —                               | —                                           | Executes the currently bound plan.                                    |
 | `delete_plan` | `plan_operation`| `plan_id` (int)                 | —                                           | Permanently deletes plan and tasks.                                   |
 | `help`        | `system_operation`| —                             | —                                           | Returns available commands/usage tips.                                |
 
@@ -51,16 +51,16 @@ LLM responses must conform to the JSON schema:
 
 | Action                    | Kind             | Required parameters                          | Optional parameters                                | Notes                                                                                             |
 | ------------------------- | ---------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `create_task`             | `task_operation` | `task_name` (string)                         | `plan_id`, `parent_id`, `instruction`, `metadata`, `dependencies`, `anchor_task_id`, `anchor_position`, `position`    | Adds task to plan；可选锚点参数支持插入到特定位置。                                              |
-| `update_task`             | `task_operation` | `task_id` or `task_name`                     | `name`, `instruction`, `metadata`, `dependencies`   | Modifies task metadata; name-based lookup may require confirmation.                              |
-| `update_task_instruction` | `task_operation` | `instruction` (string) and `task_id`/`task_name` | —                                              | Replaces task instruction; backend merges with existing prompt.                                   |
-| `move_task`               | `task_operation` | `task_id`/`task_name`                        | `new_parent_id`, `new_parent_name`                 | Reparents task; `new_parent_id: null` moves to root.                                             |
-| `delete_task`             | `task_operation` | `task_id` or `task_name`                     | `plan_id`                                          | Deletes task subtree; returns removal summary.                                                    |
-| `show_tasks`              | `task_operation` | `plan_id` (int) or bound plan context        | —                                                 | Returns task list and tree for visualization.                                                     |
-| `query_status`            | `task_operation` | `plan_id` or `task_id`                       | —                                                 | Provides plan/task status overview; task lookup returns owning plan context.                      |
-| `rerun_task`              | `task_operation` | `task_id` (int)                              | —                                                 | Resets task to `pending` and requests re-execution.                                               |
-| `decompose_task`          | `task_operation` | Bound plan (implicit)                        | `task_id`, `expand_depth`, `node_budget`          | Invokes the standalone PlanDecomposer LLM to expand tasks in BFS order; omit `task_id` to target plan roots. |
-| `request_subgraph`        | `context_request`| `logical_id` or `task_id`                    | `max_depth`                                       | Requests additional graph detail; should be the sole action in the response that issues it.       |
+| `create_task`             | `task_operation` | `name` (string)                              | `parent_id`, `instruction`, `metadata`, `dependencies`, `anchor_task_id`, `anchor_position`, `position`, `insert_before`, `insert_after` | Adds a task under the bound plan. Supports anchor-based insertion. |
+| `update_task`             | `task_operation` | `task_id` (int)                              | `name`, `instruction`, `metadata`, `dependencies` | Updates task fields.                                                    |
+| `update_task_instruction` | `task_operation` | `task_id` (int), `instruction` (string)      | —                                                | Replaces the task instruction.                                         |
+| `move_task`               | `task_operation` | `task_id` (int)                              | `new_parent_id`, `new_position`                   | Reparents a task; `new_parent_id: null` moves to root.                 |
+| `delete_task`             | `task_operation` | `task_id` (int)                              | —                                                | Deletes task subtree; returns removal summary.                          |
+| `show_tasks`              | `task_operation` | —                                            | —                                                | Returns task list and tree for visualization.                           |
+| `query_status`            | `task_operation` | —                                            | —                                                | Provides plan/task status overview for the bound plan.                 |
+| `rerun_task`              | `task_operation` | `task_id` (int)                              | —                                                | Resets task to `pending` and requests re-execution.                     |
+| `decompose_task`          | `task_operation` | —                                            | `task_id`, `expand_depth`, `node_budget`, `allow_existing_children` | Expands tasks using the decomposer; omit `task_id` to target roots. |
+| `request_subgraph`        | `context_request`| `logical_id` or `task_id`                    | `max_depth`                                       | Requests additional graph detail; must be the only action in a reply. |
 | `web_search`              | `tool_operation`| `query` (string)                              | `max_results`, `locale`, `time_range`, `provider` | Calls configured web search provider并返回摘要、引用链接，结果附在回复 metadata。                                    |
 | `graph_rag`               | `tool_operation`| `query` (string)                              | `top_k`, `hops`, `return_subgraph`, `focus_entities` | 查询噬菌体/宿主知识图谱，返回三元组、提示词以及可选子图 JSON；结果同样写入 metadata。                   |
 
@@ -80,9 +80,7 @@ Create a root task:
       "kind": "task_operation",
       "name": "create_task",
       "parameters": {
-        "plan_id": 42,
-        "task_name": "Gene Editing Whitepaper - Overview",
-        "task_type": "root",
+        "name": "Gene Editing Whitepaper - Overview",
         "instruction": "Compile the latest research milestones and key challenges."
       },
       "blocking": true,
@@ -142,9 +140,8 @@ Insert a task before an existing sibling:
       "kind": "task_operation",
       "name": "create_task",
       "parameters": {
-        "plan_id": 28,
         "parent_id": 104,
-        "task_name": "研究流程概览",
+        "name": "研究流程概览",
         "anchor_task_id": 215,
         "anchor_position": "before",
         "instruction": "总结后续实验的目标、输入数据和预期产出。"
