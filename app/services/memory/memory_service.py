@@ -329,6 +329,12 @@ class IntegratedMemoryService:
             return dt.isoformat() if dt else None
 
         with self._get_conn(session_id) as conn:
+            if memory_note.related_task_id is not None:
+                # Ensure FK target exists in the lightweight tasks table.
+                conn.execute(
+                    "INSERT OR IGNORE INTO tasks (id) VALUES (?)",
+                    (int(memory_note.related_task_id),),
+                )
             conn.execute(
                 """
                 INSERT INTO memories (
