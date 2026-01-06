@@ -9,15 +9,13 @@ import logging
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from ...config.database_config import get_database_config
 from ...database import get_db, plan_db_connection
 from ...llm import get_default_client
 from ...models_memory import (
     ImportanceLevel,
-    MemoryEvolutionResult,
     MemoryItem,
     MemoryNote,
     MemoryStats,
@@ -505,7 +503,7 @@ class IntegratedMemoryService:
     ) -> List[Dict[str, Any]]:
         """文本搜索fallback"""
         where_clause = "WHERE 1=1" if match_all else "WHERE content LIKE ?"
-        search_params = [] if match_all else [f"%{query}%"]
+        search_params: List[Any] = [] if match_all else [f"%{query}%"]
 
         if where_conditions:
             where_clause += " AND " + " AND ".join(where_conditions)

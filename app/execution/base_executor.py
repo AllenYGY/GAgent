@@ -7,7 +7,6 @@ Provides the foundation for all execution strategies.
 
 import logging
 import time
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from ..interfaces import TaskRepository
@@ -31,11 +30,16 @@ class BaseTaskExecutor:
     def get_task_id_and_name(self, task) -> tuple[int, str]:
         """Extract task ID and name from task object."""
         if hasattr(task, "id") and hasattr(task, "name"):
-            return task.id, task.name
+            task_id = task.id
+            name = task.name
         elif isinstance(task, dict):
-            return task.get("id"), task.get("name", "Untitled")
+            task_id = task.get("id")
+            name = task.get("name") or "Untitled"
         else:
             raise ValueError(f"Invalid task format: {type(task)}")
+        if task_id is None:
+            raise ValueError("Task id is missing")
+        return int(task_id), str(name)
 
     def fetch_prompt(self, task_id: int, default_prompt: str) -> str:
         """Fetch task prompt from repository or use default."""
@@ -59,7 +63,9 @@ class BaseTaskExecutor:
                 import json
 
                 embedding_str = json.dumps(embedding) if isinstance(embedding, list) else str(embedding)
-                self.repo.store_task_embedding(task_id, embedding_str)
+                store_embedding = getattr(self.repo, "store_task_embedding", None)
+                if callable(store_embedding):
+                    store_embedding(task_id, embedding_str)
                 logger.debug(f"Generated embedding for task {task_id}")
         except Exception as e:
             logger.warning(f"Failed to generate embedding for task {task_id}: {e}")

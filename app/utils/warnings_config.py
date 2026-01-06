@@ -11,9 +11,18 @@
 import functools
 import logging
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, cast
 
 logger = logging.getLogger(__name__)
+
+ActionKind = Literal[
+    "default",
+    "error",
+    "ignore",
+    "always",
+    "module",
+    "once",
+]
 
 
 def configure_warnings():
@@ -26,7 +35,7 @@ def configure_warnings():
     warnings.simplefilter("default")
 
     # 3. 忽略已知的第三方库无害警告
-    third_party_ignores = [
+    third_party_ignores: list[tuple[ActionKind, str | None, type[Warning], str | None]] = [
         # setuptools和pkg_resources的弃用警告
         ("ignore", None, DeprecationWarning, "pkg_resources.*"),
         ("ignore", None, DeprecationWarning, "setuptools.*"),
@@ -42,7 +51,12 @@ def configure_warnings():
     ]
 
     for action, message, category, module in third_party_ignores:
-        warnings.filterwarnings(action, message=message, category=category, module=module)
+        warnings.filterwarnings(
+            action,
+            message=message or "",
+            category=category,
+            module=module or "",
+        )
 
     # 4. 确保我们自己的弃用警告始终显示
     warnings.filterwarnings("always", category=DeprecationWarning, module="app.*")
@@ -91,7 +105,13 @@ def track_warnings(func):
 class WarningContext:
     """警告上下文管理器"""
 
-    def __init__(self, action: str = "ignore", category: type = Warning, message: str = "", module: str = ""):
+    def __init__(
+        self,
+        action: ActionKind = "ignore",
+        category: type = Warning,
+        message: str = "",
+        module: str = "",
+    ):
         self.action = action
         self.category = category
         self.message = message
@@ -100,7 +120,7 @@ class WarningContext:
     def __enter__(self):
         self.warnings_context = warnings.catch_warnings()
         self.warnings_context.__enter__()
-        warnings.filterwarnings(self.action, message=self.message, category=self.category, module=self.module)
+        warnings.filterwarnings(cast(Any, self.action), message=self.message, category=self.category, module=self.module)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

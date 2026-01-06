@@ -23,9 +23,8 @@ import asyncio
 import logging
 import random
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from ...interfaces import TaskRepository
 from ...repository.tasks import default_repo
 from ..executors.tool_enhanced import (
     ToolEnhancedExecutor,
@@ -44,7 +43,7 @@ RETRYABLE_STATUSES = {"failed", "error"}
 class BatchExecutor:
     """Batch execution orchestrator with concurrency and rate control."""
 
-    def __init__(self, repo: Optional[TaskRepository] = None):
+    def __init__(self, repo: Optional[Any] = None):
         self.repo = repo or default_repo
         self.executor: Optional[ToolEnhancedExecutor] = None
 
@@ -167,7 +166,10 @@ class BatchExecutor:
                     if (status in PENDING_STATUSES) or (include_retryables and status in RETRYABLE_STATUSES):
                         atomics.append(ch)
                 elif ttype in {"composite", "root"}:
-                    queue.append(ch.get("id"))
+                    child_id = ch.get("id")
+                    if child_id is None:
+                        continue
+                    queue.append(int(child_id))
                 else:
                     # Unknown type, ignore
                     pass
@@ -191,9 +193,12 @@ class BatchExecutor:
 
         async with sem:
             attempt = 0
+            executor = self.executor
+            if executor is None:
+                raise RuntimeError("Executor not initialized")
             while True:
                 try:
-                    status = await self.executor.execute_task(
+                    status = await executor.execute_task(
                         task,
                         use_context=True,
                         context_options=context_options,
@@ -220,7 +225,10 @@ class BatchExecutor:
         while cur and guard < 100:
             if cur.get("task_type") == "root":
                 return cur.get("id")
-            parent = self.repo.get_parent(cur.get("id"))
+            parent_id = cur.get("id")
+            if parent_id is None:
+                break
+            parent = self.repo.get_parent(parent_id)
             cur = parent
             guard += 1
         return None
@@ -230,7 +238,7 @@ class BatchExecutor:
 
 def run_batch(
     parent_id: int,
-    repo: Optional[TaskRepository] = None,
+    repo: Optional[Any] = None,
     concurrency: int = 4,
     rate_limit_per_minute: int = 12,
     max_retries: int = 2,

@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 import re
 
-import pytest
-
 from app.services.plans.plan_executor import (
     ExecutionConfig,
     ExecutionResponse,
     PlanExecutor,
+    PlanExecutorLLMService,
 )
 
 
@@ -19,7 +18,7 @@ def _parse_task_id(prompt: str) -> int:
     return int(match.group(1))
 
 
-class RecordingExecutorStub:
+class RecordingExecutorStub(PlanExecutorLLMService):
     """Stub PlanExecutorLLMService that records task execution order."""
 
     def __init__(self, *, failed_ids: set[int] | None = None) -> None:

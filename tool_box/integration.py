@@ -5,9 +5,8 @@ This module provides integration utilities to connect the tool box
 with existing LLM workflows and agent systems.
 """
 
-import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .client import MCPToolBoxClient
 from .tools import get_tool_registry, register_tool
@@ -203,6 +202,9 @@ class ToolBoxLLMIntegration:
         """Enhance LLM prompt with tool information"""
         if not self.toolbox:
             await self.initialize()
+
+        if not self.toolbox:
+            return user_prompt
 
         tools = await self.toolbox.get_available_tools()
 

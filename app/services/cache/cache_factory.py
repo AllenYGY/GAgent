@@ -7,7 +7,7 @@ with different storage backends and configurations.
 
 import hashlib
 import logging
-from typing import Dict, Optional, Type, Any
+from typing import Dict, Type
 
 from .base_cache import BaseCache
 from .embedding_cache import EmbeddingCache

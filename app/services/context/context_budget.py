@@ -2,6 +2,8 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.services.foundation.settings import get_settings
+
 # Priority order for budgeting. We keep deterministic ordering.
 # Phase 4: add 'index' with highest priority, before dependencies.
 # Phase 5: add hierarchy-based context types (ancestor, h_sibling).
@@ -11,7 +13,6 @@ PRIORITY_ORDER = ("pinned", "index", "dep:requires", "dep:refers", "ancestor", "
 
 
 _BUD_LOGGER = logging.getLogger("app.context.budget")
-from app.services.foundation.settings import get_settings
 
 
 def _debug_on() -> bool:

@@ -194,7 +194,7 @@ class ThreadSafeAsyncManager:
         return future
 
     def _async_embedding_worker(
-        self, texts: List[str], callback: Optional[Callable] = None, task_type: str = None
+        self, texts: List[str], callback: Optional[Callable] = None, task_type: Optional[str] = None
     ) -> List[List[float]]:
         """线程安全的异步嵌入向量工作线程"""
         start_time = time.time()
@@ -224,7 +224,7 @@ class ThreadSafeAsyncManager:
             return []
 
     def _async_single_embedding_worker(
-        self, text: str, callback: Optional[Callable] = None, task_type: str = None
+        self, text: str, callback: Optional[Callable] = None, task_type: Optional[str] = None
     ) -> List[float]:
         """线程安全的异步单个嵌入向量工作线程"""
         start_time = time.time()
@@ -255,7 +255,7 @@ class ThreadSafeAsyncManager:
             return []
 
     def _async_precompute_worker(
-        self, texts: List[str], progress_callback: Optional[Callable] = None, task_type: str = None
+        self, texts: List[str], progress_callback: Optional[Callable] = None, task_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """线程安全的异步预计算工作线程"""
         start_time = time.time()
@@ -313,7 +313,7 @@ class ThreadSafeAsyncManager:
             logger.error(f"Async precompute failed: {e}")
             return {"error": str(e)}
 
-    def _safe_execute_callback(self, callback: Callable, *args, error: Exception = None):
+    def _safe_execute_callback(self, callback: Callable, *args, error: Optional[Exception] = None):
         """安全执行回调函数，捕获异常"""
         try:
             if error:

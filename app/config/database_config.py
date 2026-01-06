@@ -95,7 +95,6 @@ class DatabaseConfig:
                     migrated.append(f"{old_path} -> {new_path}")
 
                     # 处理相关的WAL和SHM文件
-                    base_name = os.path.splitext(old_path)[0]
                     for ext in ["-wal", "-shm"]:
                         wal_shm_file = f"{old_path}{ext}"
                         if os.path.exists(wal_shm_file):

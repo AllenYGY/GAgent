@@ -91,7 +91,7 @@ class GraphRAG:
 
     def _build_triple_texts(self) -> List[Tuple[int, str, Set[str]]]:
         texts: List[Tuple[int, str, Set[str]]] = []
-        for idx, row in self.df.iterrows():
+        for idx, (_, row) in enumerate(self.df.iterrows()):
             s = f"{row['entity1']} --{row['relation']}--> {row['entity2']} | src: {row['source']}"
             texts.append((idx, s, set(_tokenize(s))))
         return texts

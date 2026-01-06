@@ -22,6 +22,7 @@ class DecomposerSettings:
     stop_on_empty: bool = True
     retry_limit: int = 1
     allow_existing_children: bool = False
+    enable_web_search: bool = True
 
 
 @lru_cache(maxsize=1)
@@ -73,6 +74,9 @@ def get_decomposer_settings() -> DecomposerSettings:
         retry_limit=_env_int("DECOMP_RETRY_LIMIT", defaults.retry_limit),
         allow_existing_children=_env_bool(
             "DECOMP_ALLOW_EXISTING_CHILDREN", defaults.allow_existing_children
+        ),
+        enable_web_search=_env_bool(
+            "DECOMP_ENABLE_WEB_SEARCH", defaults.enable_web_search
         ),
     )
 

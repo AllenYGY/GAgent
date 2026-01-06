@@ -17,6 +17,10 @@ from app.services.foundation.config import get_config
 from app.services.embeddings.embedding_batch_processor import EmbeddingBatchProcessor
 from app.services.embeddings.glm_api_client import GLMApiClient
 from app.services.embeddings.similarity_calculator import SimilarityCalculator
+from app.services.embeddings.thread_safe_embeddings import (
+    get_thread_safe_embeddings_service,
+    shutdown_thread_safe_embeddings_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ class GLMEmbeddingsService:
         self.async_manager = AsyncEmbeddingManager(self.batch_processor)
         self.similarity_calculator = SimilarityCalculator()
 
-        logger.info(f"GLM Embeddings service initialized with refactored architecture")
+        logger.info("GLM Embeddings service initialized with refactored architecture")
 
     # Core embedding methods - delegated to BatchProcessor
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
@@ -186,13 +190,6 @@ class GLMEmbeddingsService:
         import json
 
         return json.loads(json_str)
-
-
-# 导入线程安全版本
-from app.services.embeddings.thread_safe_embeddings import (
-    get_thread_safe_embeddings_service,
-    shutdown_thread_safe_embeddings_service,
-)
 
 
 # 保持向后兼容性

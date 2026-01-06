@@ -158,9 +158,9 @@ def requires_dag_order(title: Optional[str] = None) -> Tuple[List[Dict[str, Any]
     # 2) Edges within scope (requires only)
     links = default_repo.list_links(kind="requires")
     edges: List[Tuple[int, int]] = []  # (from_id -> to_id)
-    for l in links:
-        f = _safe_int(l.get("from_id"))
-        t = _safe_int(l.get("to_id"))
+    for link in links:
+        f = _safe_int(link.get("from_id"))
+        t = _safe_int(link.get("to_id"))
         if f == 0 or t == 0:  # Invalid IDs
             continue
         if (f in scoped_ids) and (t in scoped_ids):
@@ -174,7 +174,7 @@ def requires_dag_order(title: Optional[str] = None) -> Tuple[List[Dict[str, Any]
         adj[f].append(t)
 
     # 4) Initialize heap with indegree==0 nodes (stable, hierarchy-aware)
-    heap: List[Tuple[int, int, int, str, int]] = []  # key from _dag_heap_key + id
+    heap: List[Tuple[int, int, int, str, int, int]] = []  # key from _dag_heap_key + id
     # enrich rows with hierarchy fields for grouping
     _ensure_hierarchy(list(id_to_row.values()))
     for nid in scoped_ids:

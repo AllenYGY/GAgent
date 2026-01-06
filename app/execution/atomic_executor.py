@@ -82,7 +82,7 @@ class AtomicExecutor:
         """Execute async coroutine from sync context, falling back to a helper thread."""
 
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro)
 

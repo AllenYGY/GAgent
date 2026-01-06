@@ -10,7 +10,7 @@ import functools
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from ...llm import get_default_client
 from ...interfaces import LLMProvider
@@ -141,8 +141,13 @@ class LLMService:
         """
         try:
             # Check if client has async support
-            if hasattr(self.client, "chat_async"):
-                resp = await self.client.chat_async(prompt, **kwargs)
+            chat_async = getattr(self.client, "chat_async", None)
+            if callable(chat_async):
+                result = chat_async(prompt, **kwargs)
+                if asyncio.iscoroutine(result):
+                    resp = await result
+                else:
+                    resp = result
                 if isinstance(resp, str):
                     return resp
                 return self._extract_content(resp)
@@ -278,7 +283,7 @@ class TaskPromptBuilder:
             Formatted prompt string
         """
         prompt_parts = [
-            f"Write a comprehensive section that fulfills the following task:",
+            "Write a comprehensive section that fulfills the following task:",
             f"Task: {task_name}",
         ]
         
@@ -322,7 +327,7 @@ class TaskPromptBuilder:
         ]
         
         if feedback:
-            prompt_parts.append(f"\nFeedback to address:")
+            prompt_parts.append("\nFeedback to address:")
             for item in feedback:
                 prompt_parts.append(f"- {item}")
         

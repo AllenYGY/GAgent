@@ -8,13 +8,9 @@
 from typing import Any, Dict, Optional
 
 from .exceptions import (
-    AuthenticationError,
-    AuthorizationError,
     BusinessError,
     DatabaseError,
     ErrorCode,
-    ExternalServiceError,
-    NetworkError,
     SystemError,
     ValidationError,
 )
@@ -130,7 +126,6 @@ def database_operation_error(
     context: Optional[Dict[str, Any]] = None,
 ) -> DatabaseError:
     """创建数据库操作错误的便捷函数"""
-    from .messages import get_error_message
 
     return DatabaseError(
         message=f"数据库{operation}操作失败",
@@ -167,7 +162,7 @@ def evaluation_error(
 
 def decomposition_error(task_id: int, reason: str, result: Optional[Dict[str, Any]] = None) -> BusinessError:
     """创建任务分解错误的便捷函数"""
-    context = {"task_id": task_id}
+    context: Dict[str, Any] = {"task_id": task_id}
     if result:
         context["result"] = result
 

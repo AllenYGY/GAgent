@@ -6,7 +6,7 @@ Extracted from executor_enhanced.py to separate prompt logic.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ..models import EvaluationResult
 from ..services.context.context import gather_context

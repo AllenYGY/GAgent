@@ -1,5 +1,12 @@
 """Agent-oriented service helpers."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .simulation import JudgeAgent, SimulatedUserAgent
+    from .simulation.orchestrator import SimulationOrchestrator
+    from .simulation.runtime import SimulationRegistry
+
 __all__ = [
     "SimulationOrchestrator",
     "SimulationRegistry",

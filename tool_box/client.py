@@ -9,7 +9,6 @@ import asyncio
 import json
 import logging
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -107,16 +106,21 @@ class MCPToolBoxClient:
 
         try:
             process = self.processes[server_name]
+            stdin = process.stdin
+            stdout = process.stdout
+            if stdin is None or stdout is None:
+                logger.error(f"Server {server_name} missing stdio pipes")
+                return []
 
             # Send list tools request
             request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
             # Write request to stdin
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(request) + "\n")
+            stdin.flush()
 
             # Read response from stdout
-            response_line = await asyncio.get_event_loop().run_in_executor(None, process.stdout.readline)
+            response_line = await asyncio.get_event_loop().run_in_executor(None, stdout.readline)
 
             if response_line:
                 response = json.loads(response_line.strip())
@@ -136,6 +140,11 @@ class MCPToolBoxClient:
 
         try:
             process = self.processes[server_name]
+            stdin = process.stdin
+            stdout = process.stdout
+            if stdin is None or stdout is None:
+                logger.error(f"Server {server_name} missing stdio pipes")
+                return None
 
             # Send tool call request
             request = {
@@ -146,11 +155,11 @@ class MCPToolBoxClient:
             }
 
             # Write request to stdin
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(request) + "\n")
+            stdin.flush()
 
             # Read response from stdout
-            response_line = await asyncio.get_event_loop().run_in_executor(None, process.stdout.readline)
+            response_line = await asyncio.get_event_loop().run_in_executor(None, stdout.readline)
 
             if response_line:
                 response = json.loads(response_line.strip())
@@ -173,16 +182,21 @@ class MCPToolBoxClient:
 
         try:
             process = self.processes[server_name]
+            stdin = process.stdin
+            stdout = process.stdout
+            if stdin is None or stdout is None:
+                logger.error(f"Server {server_name} missing stdio pipes")
+                return []
 
             # Send list resources request
             request = {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}
 
             # Write request to stdin
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(request) + "\n")
+            stdin.flush()
 
             # Read response from stdout
-            response_line = await asyncio.get_event_loop().run_in_executor(None, process.stdout.readline)
+            response_line = await asyncio.get_event_loop().run_in_executor(None, stdout.readline)
 
             if response_line:
                 response = json.loads(response_line.strip())
@@ -202,16 +216,21 @@ class MCPToolBoxClient:
 
         try:
             process = self.processes[server_name]
+            stdin = process.stdin
+            stdout = process.stdout
+            if stdin is None or stdout is None:
+                logger.error(f"Server {server_name} missing stdio pipes")
+                return None
 
             # Send read resource request
             request = {"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": uri}}
 
             # Write request to stdin
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
+            stdin.write(json.dumps(request) + "\n")
+            stdin.flush()
 
             # Read response from stdout
-            response_line = await asyncio.get_event_loop().run_in_executor(None, process.stdout.readline)
+            response_line = await asyncio.get_event_loop().run_in_executor(None, stdout.readline)
 
             if response_line:
                 response = json.loads(response_line.strip())

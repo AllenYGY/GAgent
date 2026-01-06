@@ -455,6 +455,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     for res in successes:
         out_dir = sim_root / f"plan_{res.plan_id}"
         print(f"[INFO] Running simulations for plan #{res.plan_id} into {out_dir}", flush=True)
+        if res.plan_id is None:
+            continue
         run_parallel_simulations(res.plan_id, args, out_dir)
 
 

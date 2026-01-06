@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
 import matplotlib
 
@@ -132,13 +132,14 @@ def ensure_output_dir(path: Path) -> None:
 def plot_provider_dimension_heatmap(df: pd.DataFrame, output: Path) -> None:
     pivot = df.groupby("provider")[DIMENSIONS].mean().sort_index()
     fig, ax = plt.subplots(figsize=(1.4 * len(DIMENSIONS), 0.6 * len(pivot)))
-    im = ax.imshow(pivot.values, cmap="viridis", vmin=1, vmax=5, aspect="auto")
+    values = np.asarray(pivot.values, dtype=float)
+    im = ax.imshow(values, cmap="viridis", vmin=1, vmax=5, aspect="auto")
     ax.set_xticks(range(len(DIMENSIONS)))
     ax.set_xticklabels(
         [dim.replace("_", "\n").title() for dim in DIMENSIONS], rotation=0, fontsize=10
     )
     ax.set_yticks(range(len(pivot)))
-    ax.set_yticklabels([provider.upper() for provider in pivot.index], fontsize=11)
+    ax.set_yticklabels([str(provider).upper() for provider in pivot.index], fontsize=11)
     ax.set_title("Average Score per Dimension by Provider", fontsize=14)
     for (i, j), value in np.ndenumerate(pivot.values):
         ax.text(
@@ -159,10 +160,10 @@ def plot_provider_dimension_heatmap(df: pd.DataFrame, output: Path) -> None:
 
 def _rank_plans(df: pd.DataFrame, plan_order: str) -> pd.Series:
     if plan_order == "median":
-        return df.groupby("plan_id")["average_score"].median()
+        return cast(pd.Series, df.groupby("plan_id")["average_score"].median())
     if plan_order == "max":
-        return df.groupby("plan_id")["average_score"].max()
-    return df.groupby("plan_id")["average_score"].mean()
+        return cast(pd.Series, df.groupby("plan_id")["average_score"].max())
+    return cast(pd.Series, df.groupby("plan_id")["average_score"].mean())
 
 
 def plot_plan_dimension_heatmaps_per_provider(
@@ -174,13 +175,14 @@ def plot_plan_dimension_heatmaps_per_provider(
     grouped = df.groupby("provider")
     for provider, chunk in grouped:
         ranking = _rank_plans(chunk, plan_order).sort_values(ascending=False)
-        top_ids = ranking.head(top_plans).index
+        top_ids = list(ranking.head(top_plans).index)
         filtered = chunk[chunk["plan_id"].isin(top_ids)]
         if filtered.empty:
             continue
         pivot = filtered.groupby("plan_id")[DIMENSIONS].mean().loc[top_ids]
         fig, ax = plt.subplots(figsize=(1.4 * len(DIMENSIONS), 0.35 * len(pivot) + 1))
-        im = ax.imshow(pivot.values, cmap="magma", vmin=1, vmax=5, aspect="auto")
+        values = np.asarray(pivot.values, dtype=float)
+        im = ax.imshow(values, cmap="magma", vmin=1, vmax=5, aspect="auto")
         ax.set_xticks(range(len(DIMENSIONS)))
         ax.set_xticklabels(
             [dim.replace("_", "\n").title() for dim in DIMENSIONS], fontsize=10
@@ -188,7 +190,7 @@ def plot_plan_dimension_heatmaps_per_provider(
         ax.set_yticks(range(len(pivot)))
         ax.set_yticklabels([f"Plan {pid}" for pid in pivot.index], fontsize=9)
         ax.set_title(
-            f"Plan vs Dimension Heatmap – {provider.upper()} (Top {len(pivot)})",
+            f"Plan vs Dimension Heatmap – {str(provider).upper()} (Top {len(pivot)})",
             fontsize=14,
         )
         cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
@@ -201,7 +203,7 @@ def plot_plan_dimension_heatmaps_per_provider(
 
 def plot_plan_provider_heatmap(df: pd.DataFrame, output: Path, top_plans: int, plan_order: str) -> None:
     ranking = _rank_plans(df, plan_order).sort_values(ascending=False)
-    top_ids = ranking.head(top_plans).index
+    top_ids = list(ranking.head(top_plans).index)
     filtered = df[df["plan_id"].isin(top_ids)]
     pivot = filtered.pivot_table(
         index="plan_id",
@@ -213,9 +215,10 @@ def plot_plan_provider_heatmap(df: pd.DataFrame, output: Path, top_plans: int, p
         print("[WARN] Combined plan-provider heatmap has no data.")
         return
     pivot = pivot[sorted(pivot.columns)]
-    providers = list(pivot.columns)
+    providers = [str(p) for p in pivot.columns]
     fig, ax = plt.subplots(figsize=(0.9 * len(providers) + 2, 0.4 * len(pivot) + 1))
-    im = ax.imshow(pivot.values, cmap="plasma", vmin=1, vmax=5, aspect="auto")
+    values = np.asarray(pivot.values, dtype=float)
+    im = ax.imshow(values, cmap="plasma", vmin=1, vmax=5, aspect="auto")
     ax.set_xticks(range(len(providers)))
     ax.set_xticklabels([p.upper() for p in providers], fontsize=10)
     ax.set_yticks(range(len(pivot)))

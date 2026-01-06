@@ -262,13 +262,17 @@ class SimulationOrchestrator:
         actions_payload = (
             step_payloads
             if step_payloads
-            else [action.model_dump(exclude_none=True) for action in chat_turn.actions]
+            else [
+                action.model_dump(exclude_none=True)
+                for action in chat_turn.actions
+                if action is not None
+            ]
         )
         raw_actions: List[Dict[str, Any]] = []
         tool_results: List[Dict[str, Any]] = []
         for step in getattr(agent_result, "steps", []) or []:
             action = getattr(step, "action", None)
-            if hasattr(action, "model_dump"):
+            if action is not None and hasattr(action, "model_dump"):
                 try:
                     raw_actions.append(action.model_dump())
                 except Exception:  # pragma: no cover - defensive

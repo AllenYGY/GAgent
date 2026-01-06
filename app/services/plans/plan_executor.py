@@ -40,12 +40,32 @@ class ExecutionResponse(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def model_validate_json(cls, raw: str) -> "ExecutionResponse":
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> "ExecutionResponse":
         try:
-            payload = json.loads(raw)
+            if isinstance(json_data, (bytes, bytearray)):
+                text = json_data.decode("utf-8", errors="ignore")
+            else:
+                text = str(json_data)
+            payload = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValidationError([exc], cls) from exc
-        return super().model_validate(payload)
+        return super().model_validate(
+            payload,
+            strict=strict,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+            extra=extra,
+        )
 
 
 @dataclass

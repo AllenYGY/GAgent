@@ -234,8 +234,6 @@ class GraphAttentionReranker:
             return {task_id: 0.0 for task_id in task_ids}
 
         query_idx = task_ids.index(query_task_id)
-        n = len(task_ids)
-
         # Simplified multi-head attention mechanism
         attention_scores = {}
 

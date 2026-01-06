@@ -14,10 +14,11 @@ from app.services.agents.simulation.models import (
     SimulatedTurn,
     SimulatedUserTurn,
 )
+from app.services.agents.simulation.orchestrator import SimulationOrchestrator
 from app.services.agents.simulation.runtime import SimulationRegistry
 
 
-class FakeOrchestrator:
+class FakeOrchestrator(SimulationOrchestrator):
     def __init__(self) -> None:
         self.invocations = 0
 

@@ -1931,19 +1931,7 @@ class StructuredChatAgent:
     def _build_prompt(self, user_message: str, *, memory_snippets: str = "") -> str:
         plan_bound = self.plan_session.plan_id is not None
         history_text = self._format_history()
-        context_text = ""
-        try:
-            if isinstance(self.extra_context, dict):
-                minimal_keys = {}
-                # We intentionally strip verbose simulation extras from the prompt
-                # to reduce prompt length/noise.
-                context_text = json.dumps(minimal_keys, ensure_ascii=False, indent=2)
-            else:
-                context_text = json.dumps({}, ensure_ascii=False, indent=2)
-        except Exception:
-            context_text = ""
         plan_outline = self.plan_session.outline(max_depth=4, max_nodes=60)
-        plan_status = self._compose_plan_status(plan_bound)
         plan_catalog = self._compose_plan_catalog(plan_bound)
         actions_catalog = self._compose_action_catalog(plan_bound)
         guidelines = self._compose_guidelines(plan_bound)
@@ -2909,6 +2897,7 @@ class StructuredChatAgent:
             expand_depth_raw = params.get("expand_depth")
             node_budget_raw = params.get("node_budget")
             allow_existing_raw = params.get("allow_existing_children")
+            allow_web_search_raw = params.get("allow_web_search")
 
             expand_depth = (
                 self._coerce_int(expand_depth_raw, "expand_depth")
@@ -2933,6 +2922,19 @@ class StructuredChatAgent:
                         "yes",
                         "y",
                     }
+            allow_web_search = None
+            if allow_web_search_raw is not None:
+                if isinstance(allow_web_search_raw, bool):
+                    allow_web_search = allow_web_search_raw
+                else:
+                    allow_web_search = str(
+                        allow_web_search_raw
+                    ).strip().lower() in {
+                        "1",
+                        "true",
+                        "yes",
+                        "y",
+                    }
 
             task_id_raw = params.get("task_id")
             if task_id_raw is None:
@@ -2940,6 +2942,7 @@ class StructuredChatAgent:
                     tree.id,
                     max_depth=expand_depth,
                     node_budget=node_budget,
+                    allow_web_search=allow_web_search,
                 )
             else:
                 task_id = self._coerce_int(task_id_raw, "task_id")
@@ -2949,6 +2952,7 @@ class StructuredChatAgent:
                     expand_depth=expand_depth,
                     node_budget=node_budget,
                     allow_existing_children=allow_existing_children,
+                    allow_web_search=allow_web_search,
                 )
 
             self._last_decomposition = result

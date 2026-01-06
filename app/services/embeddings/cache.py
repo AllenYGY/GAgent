@@ -9,7 +9,6 @@ supports both in-memory cache and persistent storage modes.
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -82,12 +81,16 @@ class EmbeddingCache:
         content = f"{model}:{text}"
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    def get(self, text: str, model: str = None) -> Optional[List[float]]:
+    def _resolve_model(self, model: Optional[str]) -> str:
+        value = model or getattr(self.config, "embedding_model", None)
+        return value or "embedding-3"
+
+    def get(self, text: str, model: Optional[str] = None) -> Optional[List[float]]:
         """Get embedding from cache"""
         if not text.strip():
             return None
 
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         text_hash = self._compute_text_hash(text, model)
         current_time = time.time()
 
@@ -139,12 +142,12 @@ class EmbeddingCache:
         logger.debug(f"Cache miss: {text_hash[:8]}...")
         return None
 
-    def put(self, text: str, embedding: List[float], model: str = None) -> None:
+    def put(self, text: str, embedding: List[float], model: Optional[str] = None) -> None:
         """Store embedding in cache"""
         if not text.strip() or not embedding:
             return
 
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         text_hash = self._compute_text_hash(text, model)
         current_time = time.time()
 
@@ -200,9 +203,9 @@ class EmbeddingCache:
         del self._memory_cache[lru_key]
         logger.debug(f"Evicted from memory cache: {lru_key[:8]}...")
 
-    def get_batch(self, texts: List[str], model: str = None) -> Tuple[List[Optional[List[float]]], List[int]]:
+    def get_batch(self, texts: List[str], model: Optional[str] = None) -> Tuple[List[Optional[List[float]]], List[int]]:
         """Batch get embeddings, return (result list, indices of missed texts)"""
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         results = []
         cache_misses = []
 
@@ -214,7 +217,7 @@ class EmbeddingCache:
 
         return results, cache_misses
 
-    def put_batch(self, texts: List[str], embeddings: List[List[float]], model: str = None) -> None:
+    def put_batch(self, texts: List[str], embeddings: List[List[float]], model: Optional[str] = None) -> None:
         """Batch store embeddings"""
         if len(texts) != len(embeddings):
             raise ValueError("texts and embeddings must have the same length")

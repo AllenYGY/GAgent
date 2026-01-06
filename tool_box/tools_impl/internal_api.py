@@ -4,10 +4,9 @@ Internal API Tool Implementation
 This module provides internal API call functionality for AI agents.
 """
 
-import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 

@@ -78,7 +78,10 @@ def _clone_plan_records(
                     row["metadata"],
                 ),
             )
-            new_plan_id = int(cursor.lastrowid)
+            new_id = cursor.lastrowid
+            if new_id is None:
+                raise RuntimeError("Failed to create cloned plan record")
+            new_plan_id = int(new_id)
             new_rel_path = f"plan_{new_plan_id}.sqlite"
             conn.execute(
                 "UPDATE plans SET plan_db_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -598,7 +601,7 @@ def main() -> None:
         import csv
 
         parallelism = max(1, min(args.parallelism, args.runs)) if args.runs else 1
-        results: List[Dict[str, str]] = []
+        plan_results: List[Dict[str, Any]] = []
         raw_dir = output_root / "run_logs" / "raw"
         parsed_dir = output_root / "run_logs" / "parsed"
         sim_user_dir = output_root / "run_logs" / "sim_user"
@@ -648,8 +651,8 @@ def main() -> None:
                     f"[WARN] Failed to save judge failure run={run_idx} turn={turn_idx}: {exc}"
                 )
 
-        def _run_full_plan(run_idx: int, base_plan: Path) -> List[Dict[str, str]]:
-            rows: List[Dict[str, str]] = []
+        def _run_full_plan(run_idx: int, base_plan: Path) -> List[Dict[str, Any]]:
+            rows: List[Dict[str, Any]] = []
             baseline_path = base_plan
             history_texts: List[str] = []
             for turn_idx in range(1, args.max_turns + 1):
@@ -661,7 +664,7 @@ def main() -> None:
                 )
                 def _gen_with_retry(base_path: Path, prompt: str, raw_dir: Path, parsed_dir: Path):
                     # retry once on generation/parsing errors
-                    last_exc = None
+                    last_exc: Optional[Exception] = None
                     for attempt in (1, 2):
                         try:
                             return _generate_agent_plan(
@@ -683,6 +686,8 @@ def main() -> None:
                                     f"[WARN] Retry sim/agent generation run={run_idx} turn={turn_idx} attempt={attempt} failed: {exc}"
                                 )
                                 continue
+                    if last_exc is None:
+                        raise RuntimeError("Plan generation failed")
                     raise last_exc
 
                 try:
@@ -810,7 +815,7 @@ def main() -> None:
                 run_idx = future_map[future]
                 try:
                     rows = future.result()
-                    results.extend(rows)
+                    plan_results.extend(rows)
                 except Exception as exc:
                     print(f"[ERR] Run {run_idx} failed: {exc}")
 
@@ -824,7 +829,7 @@ def main() -> None:
                 "alignment",
                 "reason",
             ])
-            for row in results:
+            for row in plan_results:
                 writer.writerow([
                     row["run"],
                     row["turn"],

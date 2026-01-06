@@ -1,5 +1,5 @@
 import os
-from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -59,14 +59,14 @@ def test_dependency_deduplication(plan_repo: PlanRepository):
         plan_id,
         name="Target",
         parent_id=root.id,
-        dependencies=[dep_a.id, dep_a.id, "invalid", dep_b.id],
+        dependencies=cast(list[int], [dep_a.id, dep_a.id, "invalid", dep_b.id]),
     )
     assert set(node.dependencies) == {dep_a.id, dep_b.id}
 
     updated = plan_repo.update_task(
         plan_id,
         node.id,
-        dependencies=[dep_b.id, "invalid", dep_b.id],
+        dependencies=cast(list[int], [dep_b.id, "invalid", dep_b.id]),
     )
     assert set(updated.dependencies) == {dep_b.id}
 
@@ -100,7 +100,7 @@ def test_update_task_metadata_without_touching_dependencies(plan_repo: PlanRepos
 def test_error_branches(plan_repo: PlanRepository):
     plan = plan_repo.create_plan("Error Plan")
     plan_id = plan.id
-    node = plan_repo.create_task(plan_id, name="Base Node")
+    _node = plan_repo.create_task(plan_id, name="Base Node")
 
     with pytest.raises(ValueError):
         plan_repo.subgraph(plan_id, node_id=999, max_depth=2)
@@ -126,9 +126,9 @@ def test_create_task_with_anchor_positions(plan_repo: PlanRepository):
     plan_id = plan.id
 
     parent = plan_repo.create_task(plan_id, name="Chapter")
-    child_a = plan_repo.create_task(plan_id, name="Section A", parent_id=parent.id)
+    _child_a = plan_repo.create_task(plan_id, name="Section A", parent_id=parent.id)
     child_b = plan_repo.create_task(plan_id, name="Section B", parent_id=parent.id)
-    child_c = plan_repo.create_task(plan_id, name="Section C", parent_id=parent.id)
+    _child_c = plan_repo.create_task(plan_id, name="Section C", parent_id=parent.id)
 
     inserted_before = plan_repo.create_task(
         plan_id,
@@ -148,14 +148,14 @@ def test_create_task_with_anchor_positions(plan_repo: PlanRepository):
     )
     assert inserted_after.parent_id == parent.id
 
-    inserted_first = plan_repo.create_task(
+    _inserted_first = plan_repo.create_task(
         plan_id,
         name="Preface",
         parent_id=parent.id,
         anchor_position="first_child",
     )
 
-    inserted_last = plan_repo.create_task(
+    _inserted_last = plan_repo.create_task(
         plan_id,
         name="Closing",
         parent_id=parent.id,
@@ -181,7 +181,7 @@ def test_create_task_anchor_validation(plan_repo: PlanRepository):
 
     alpha = plan_repo.create_task(plan_id, name="Alpha")
     beta = plan_repo.create_task(plan_id, name="Beta")
-    child = plan_repo.create_task(plan_id, name="Child", parent_id=alpha.id)
+    _child = plan_repo.create_task(plan_id, name="Child", parent_id=alpha.id)
 
     with pytest.raises(ValueError):
         plan_repo.create_task(

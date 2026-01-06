@@ -1,14 +1,12 @@
-import os
-
-import pytest
-
 from app import llm as llm_module
 from app.config import decomposer_config, executor_config
+from app.interfaces import LLMProvider
+from app.services.llm.llm_service import LLMService
 from app.services.llm.decomposer_service import PlanDecomposerLLMService
 from app.services.plans.plan_executor import ExecutionConfig, PlanExecutorLLMService
 
 
-class StubLLMClient:
+class StubLLMClient(LLMProvider):
     """Minimal async/sync client for LLMService injection in tests."""
 
     def __init__(self) -> None:
@@ -24,12 +22,20 @@ class StubLLMClient:
         self.calls.append({"mode": "sync", "prompt": prompt, "kwargs": kwargs})
         return '{"status": "success", "content": "ok", "notes": [], "metadata": {}}'
 
+    def ping(self) -> bool:
+        return True
 
-class StubLLMService:
+    def config(self) -> dict:
+        return {"provider": "stub"}
+
+
+class StubLLMService(LLMService):
     """Simple wrapper exposing chat() for PlanExecutor/Decomposer tests."""
 
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        super().__init__(client=StubLLMClient())
+        self.calls: list[dict] = []
+        self.response: str = ""
 
     def chat(self, prompt: str, **kwargs):
         self.calls.append({"prompt": prompt, "kwargs": kwargs})

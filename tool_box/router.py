@@ -8,9 +8,7 @@ and automatically select the most appropriate tools.
 import asyncio
 import json
 import logging
-import os
-import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from .integration import get_llm_integration
 from .tools import get_tool_registry
@@ -33,7 +31,6 @@ class SmartToolRouter:
 
     async def initialize(self) -> None:
         """Initialize the router"""
-        from .integration import get_llm_integration
 
         self.llm_integration = await get_llm_integration()
 
@@ -45,7 +42,6 @@ class SmartToolRouter:
             try:
                 # Use unified LLM client from app.llm
                 from app.llm import get_default_client
-                import asyncio
                 
                 client = get_default_client()
                 provider = client.provider

@@ -9,7 +9,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.routers.chat_routes import AgentResult, AgentStep, StructuredChatAgent
 from app.services.llm.structured_response import LLMAction, LLMReply, LLMStructuredResponse
-from app.services.plans.plan_executor import ExecutionConfig, ExecutionResponse, PlanExecutor
+from app.services.plans.plan_executor import (
+    ExecutionConfig,
+    ExecutionResponse,
+    PlanExecutor,
+    PlanExecutorLLMService,
+)
 from app.services.plans.plan_session import PlanSession
 
 
@@ -25,10 +30,10 @@ def _parse_task_id(prompt: str) -> int:
     return int(match.group(1))
 
 
-class StubExecutorLLM:
+class StubExecutorLLM(PlanExecutorLLMService):
     """LLM stub that reports successful execution for every task."""
 
-    def __init__(self) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         self.calls: list[int] = []
 
     def generate(self, prompt: str, config: ExecutionConfig) -> ExecutionResponse:

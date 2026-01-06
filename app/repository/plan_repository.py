@@ -82,6 +82,9 @@ class PlanRepository:
                 (title, owner, description, metadata_json),
             )
             plan_id = cursor.lastrowid
+            if plan_id is None:
+                raise RuntimeError("Failed to create plan record")
+            plan_id = int(plan_id)
             plan_rel_path = f"plan_{plan_id}.sqlite"
             conn.execute(
                 """

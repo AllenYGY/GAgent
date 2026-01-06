@@ -4,17 +4,19 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Iterable, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 from ...config.decomposer_config import DecomposerSettings, get_decomposer_settings
 from ...repository.plan_repository import PlanRepository
+from ...utils import parse_json_obj, run_async
 from .plan_models import PlanNode, PlanTree
 from ..llm.decomposer_service import (
     DecompositionChild,
     PlanDecomposerLLMService,
 )
+from tool_box.integration import execute_tool
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,11 @@ class DecompositionResult(BaseModel):
     stats: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SearchDecision(BaseModel):
+    use_search: bool = False
+    query: Optional[str] = None
+
+
 class DecompositionPromptBuilder:
     """Compose prompts for the decomposition LLM without sharing chat history."""
 
@@ -58,6 +65,7 @@ class DecompositionPromptBuilder:
         plan: PlanTree,
         node: Optional[PlanNode],
         outline: str,
+        web_context: Optional[str],
         mode: str,
         settings: DecomposerSettings,
         depth: int,
@@ -88,50 +96,61 @@ class DecompositionPromptBuilder:
             self.SYSTEM_HEADER,
             "\n=== PLAN OVERVIEW ===",
             outline or "(empty plan)",
-            "\n=== TARGET NODE ===",
-            f"Name: {node_title}",
-            f"Instruction: {node_instruction}",
-            f"Existing children count: {len(node_children)}",
-            *node_children,
-            "\n=== CONSTRAINTS ===",
-            self._format_constraints(constraints),
-            "\n=== RESPONSE FORMAT ===",
-            "{",
-            '  "target_node_id": <int or null>,',
-            '  "mode": "plan_bfs" | "single_node",',
-            '  "should_stop": <true|false>,',
-            '  "reason": "<optional string>",',
-            '  "children": [',
-            "    {",
-            '      "name": "<task name>",',
-            '      "instruction": "<execution details>",',
-            '      "dependencies": [<int>],',
-            '      "leaf": <true|false>,',
-            '      "context": {',
-            '         "combined": "<optional summary>",',
-            '         "sections": [',
-            '             {',
-            '                 "title": "<section title>",',
-            '                 "content": "<section details>"',
-            '             }',
-            '         ],',
-            '         "meta": {',
-            '             "<key>": "<value>"',
-            '         }',
-            "      }",
-            "    }",
-            "  ]",
-            "}",
-            "\nSTRICT REQUIREMENTS:",
-            "- The entire response must be valid JSON (no comments, no trailing commas, no Markdown code fences).",
-            "- `children` must be an array. Each child must include `name`, `instruction`, `dependencies`, `leaf`, and `context`.",
-            "- `context.sections` must be an array of JSON objects, never strings. Every object must provide `title` and `content` keys.",
-            "- Use empty arrays (`[]`) or empty objects (`{}`) when there is no data.",
-            "- Do not invent additional top-level keys beyond this schema.",
-            f"- Aim to produce between {settings.min_children} and {settings.max_children} well-scoped child tasks when the work warrants it.",
-            f"- Returning fewer than {settings.min_children} children is acceptable only if the task is inherently small; explain via `reason` when doing so.",
-            "\nOnly return JSON. Do not wrap the response in Markdown code fences.",
         ]
+        if web_context:
+            prompt.extend(
+                [
+                    "\n=== WEB CONTEXT ===",
+                    web_context,
+                ]
+            )
+        prompt.extend(
+            [
+                "\n=== TARGET NODE ===",
+                f"Name: {node_title}",
+                f"Instruction: {node_instruction}",
+                f"Existing children count: {len(node_children)}",
+                *node_children,
+                "\n=== CONSTRAINTS ===",
+                self._format_constraints(constraints),
+                "\n=== RESPONSE FORMAT ===",
+                "{",
+                '  "target_node_id": <int or null>,',
+                '  "mode": "plan_bfs" | "single_node",',
+                '  "should_stop": <true|false>,',
+                '  "reason": "<optional string>",',
+                '  "children": [',
+                "    {",
+                '      "name": "<task name>",',
+                '      "instruction": "<execution details>",',
+                '      "dependencies": [<int>],',
+                '      "leaf": <true|false>,',
+                '      "context": {',
+                '         "combined": "<optional summary>",',
+                '         "sections": [',
+                '             {',
+                '                 "title": "<section title>",',
+                '                 "content": "<section details>"',
+                '             }',
+                '         ],',
+                '         "meta": {',
+                '             "<key>": "<value>"',
+                '         }',
+                "      }",
+                "    }",
+                "  ]",
+                "}",
+                "\nSTRICT REQUIREMENTS:",
+                "- The entire response must be valid JSON (no comments, no trailing commas, no Markdown code fences).",
+                "- `children` must be an array. Each child must include `name`, `instruction`, `dependencies`, `leaf`, and `context`.",
+                "- `context.sections` must be an array of JSON objects, never strings. Every object must provide `title` and `content` keys.",
+                "- Use empty arrays (`[]`) or empty objects (`{}`) when there is no data.",
+                "- Do not invent additional top-level keys beyond this schema.",
+                f"- Aim to produce between {settings.min_children} and {settings.max_children} well-scoped child tasks when the work warrants it.",
+                f"- Returning fewer than {settings.min_children} children is acceptable only if the task is inherently small; explain via `reason` when doing so.",
+                "\nOnly return JSON. Do not wrap the response in Markdown code fences.",
+            ]
+        )
         return "\n".join(prompt)
 
     def _summarise_children(self, plan: PlanTree, node_id: int) -> List[str]:
@@ -153,6 +172,11 @@ class DecompositionPromptBuilder:
 class PlanDecomposer:
     """High-level façade orchestrating BFS task decomposition."""
 
+    SEARCH_DECISION_HEADER = (
+        "You are a search decision assistant. Decide whether web search is required "
+        "to decompose the target node into actionable subtasks. Return only JSON."
+    )
+
     def __init__(
         self,
         *,
@@ -169,12 +193,129 @@ class PlanDecomposer:
     def settings(self) -> DecomposerSettings:
         return self._settings
 
+    def _build_search_decision_prompt(
+        self,
+        *,
+        plan: PlanTree,
+        node: Optional[PlanNode],
+        outline: str,
+        depth: int,
+        max_depth: int,
+    ) -> str:
+        if node is None:
+            node_title = plan.title
+            node_instruction = plan.description or ""
+            node_path = "/"
+            node_children: List[str] = []
+        else:
+            node_title = node.name
+            node_instruction = node.instruction or ""
+            node_path = node.path or f"/{node.id}"
+            node_children = self._prompt_builder._summarise_children(plan, node.id)
+
+        prompt = [
+            self.SEARCH_DECISION_HEADER,
+            "\n=== PLAN OVERVIEW ===",
+            outline or "(empty plan)",
+            "\n=== TARGET NODE ===",
+            f"Name: {node_title}",
+            f"Instruction: {node_instruction}",
+            f"Path: {node_path}",
+            f"Depth: {depth} (max {max_depth})",
+            f"Existing children count: {len(node_children)}",
+            *node_children,
+            "\n=== RESPONSE FORMAT ===",
+            "{",
+            '  "use_search": <true|false>,',
+            '  "query": "<string>"',
+            "}",
+            "\nSTRICT REQUIREMENTS:",
+            "- Return only valid JSON (no Markdown, no extra keys).",
+            "- Use search only if external info is needed to decompose the node.",
+            "- If use_search is false, set query to an empty string.",
+            "- Keep query concise (<= 120 characters).",
+        ]
+        return "\n".join(prompt)
+
+    @staticmethod
+    def _parse_search_decision(raw: Any) -> SearchDecision:
+        text = "" if raw is None else str(raw)
+        parsed = parse_json_obj(text)
+        if not isinstance(parsed, dict):
+            return SearchDecision(use_search=False, query=None)
+        use_search = bool(parsed.get("use_search"))
+        query_raw = parsed.get("query")
+        query = str(query_raw).strip() if query_raw is not None else ""
+        if not use_search or not query:
+            return SearchDecision(use_search=False, query=None)
+        if len(query) > 120:
+            query = query[:120].strip()
+        return SearchDecision(use_search=True, query=query)
+
+    @staticmethod
+    def _format_web_context(payload: Dict[str, Any]) -> Tuple[str, int, Optional[str]]:
+        summary = str(payload.get("response") or payload.get("answer") or "").strip()
+        results = payload.get("results") or []
+        if not isinstance(results, list):
+            results = []
+        provider = payload.get("provider")
+
+        lines: List[str] = []
+        if summary:
+            lines.append(f"Summary: {summary}")
+        if results:
+            lines.append("Sources:")
+            for item in results[:5]:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "source").strip()
+                url = str(item.get("url") or "").strip()
+                snippet = str(item.get("snippet") or "").strip()
+                line = f"- {title}"
+                if url:
+                    line += f" | {url}"
+                if snippet:
+                    line += f" | {snippet}"
+                lines.append(line)
+
+        return "\n".join(lines).strip(), len(results), provider
+
+    def _apply_web_context(
+        self,
+        *,
+        plan_id: int,
+        node: Optional[PlanNode],
+        tree: PlanTree,
+        context: str,
+        query: str,
+        provider: Optional[str],
+        results_count: int,
+    ) -> None:
+        if node is None or not context:
+            return
+        sections = list(node.context_sections or [])
+        sections.append({"title": "web_search", "content": context})
+        meta = dict(node.context_meta or {})
+        meta["web_search"] = {
+            "query": query,
+            "provider": provider,
+            "results_count": results_count,
+        }
+        updated = self._repo.update_task(
+            plan_id,
+            node.id,
+            context_sections=sections,
+            context_meta=meta,
+        )
+        tree.nodes[updated.id] = updated
+
     def run_plan(
         self,
         plan_id: int,
         *,
         max_depth: Optional[int] = None,
         node_budget: Optional[int] = None,
+        allow_web_search: Optional[bool] = None,
     ) -> DecompositionResult:
         """Decompose an entire plan by traversing from the plan root."""
         tree = self._repo.get_plan_tree(plan_id)
@@ -196,6 +337,7 @@ class PlanDecomposer:
             if node_budget is not None
             else self._settings.total_node_budget,
             root_reference=root_reference,
+            allow_web_search=allow_web_search,
         )
 
     def decompose_node(
@@ -206,6 +348,7 @@ class PlanDecomposer:
         expand_depth: Optional[int] = 1,
         node_budget: Optional[int] = None,
         allow_existing_children: Optional[bool] = None,
+        allow_web_search: Optional[bool] = None,
     ) -> DecompositionResult:
         """Decompose a specific node and optionally continue BFS under it."""
         tree = self._repo.get_plan_tree(plan_id)
@@ -227,6 +370,7 @@ class PlanDecomposer:
             else self._settings.total_node_budget,
             override_allow_existing_children=allow_existing_children,
             root_reference=root_reference,
+            allow_web_search=allow_web_search,
         )
 
     # ------------------------------------------------------------------
@@ -244,6 +388,7 @@ class PlanDecomposer:
         node_budget: int,
         override_allow_existing_children: Optional[bool] = None,
         root_reference: Optional[int] = None,
+        allow_web_search: Optional[bool] = None,
     ) -> DecompositionResult:
         processed: List[Optional[int]] = []
         created_nodes: List[PlanNode] = []
@@ -273,6 +418,11 @@ class PlanDecomposer:
             self._settings.allow_existing_children
             if override_allow_existing_children is None
             else override_allow_existing_children
+        )
+        effective_allow_web_search = (
+            self._settings.enable_web_search
+            if allow_web_search is None
+            else allow_web_search
         )
 
         while queue and budget_remaining > 0:
@@ -307,10 +457,107 @@ class PlanDecomposer:
                     "budget_remaining": budget_remaining,
                 },
             )
+            web_context: Optional[str] = None
+            if effective_allow_web_search and hasattr(self._llm, "decide_search"):
+                decision_prompt = self._build_search_decision_prompt(
+                    plan=tree,
+                    node=node,
+                    outline=outline_cache,
+                    depth=current.relative_depth,
+                    max_depth=max_depth,
+                )
+                try:
+                    raw_decision = self._llm.decide_search(decision_prompt)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.exception(
+                        "Search decision failed for node %s: %s",
+                        current.node_id,
+                        exc,
+                    )
+                    _log_job(
+                        "error",
+                        "Search decision LLM call failed",
+                        {"node_id": current.node_id, "error": str(exc)},
+                    )
+                    raw_decision = ""
+
+                decision = self._parse_search_decision(raw_decision)
+                _log_job(
+                    "info",
+                    "Search decision evaluated",
+                    {
+                        "node_id": current.node_id,
+                        "use_search": decision.use_search,
+                        "query": decision.query or "",
+                    },
+                )
+                if decision.use_search and decision.query:
+                    try:
+                        payload = run_async(
+                            execute_tool(
+                                "web_search",
+                                query=decision.query,
+                                max_results=5,
+                            )
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.exception(
+                            "Web search failed for node %s: %s",
+                            current.node_id,
+                            exc,
+                        )
+                        _log_job(
+                            "error",
+                            "Web search failed",
+                            {"node_id": current.node_id, "error": str(exc)},
+                        )
+                        payload = None
+
+                    if isinstance(payload, dict) and payload.get("success", True):
+                        web_context, results_count, provider = self._format_web_context(
+                            payload
+                        )
+                        if web_context:
+                            self._apply_web_context(
+                                plan_id=plan_id,
+                                node=node,
+                                tree=tree,
+                                context=web_context,
+                                query=decision.query,
+                                provider=provider,
+                                results_count=results_count,
+                            )
+                        _log_job(
+                            "info",
+                            "Web search completed",
+                            {
+                                "node_id": current.node_id,
+                                "query": decision.query,
+                                "provider": provider,
+                                "results_count": results_count,
+                            },
+                        )
+                    elif isinstance(payload, dict):
+                        _log_job(
+                            "error",
+                            "Web search returned failure",
+                            {
+                                "node_id": current.node_id,
+                                "query": decision.query,
+                                "error": payload.get("error"),
+                            },
+                        )
+            elif effective_allow_web_search:
+                _log_job(
+                    "debug",
+                    "Search decision skipped (unsupported LLM)",
+                    {"node_id": current.node_id},
+                )
             prompt = self._prompt_builder.build(
                 plan=tree,
                 node=node,
                 outline=outline_cache,
+                web_context=web_context,
                 mode=mode,
                 settings=self._settings,
                 depth=current.relative_depth,

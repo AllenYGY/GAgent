@@ -7,9 +7,9 @@ batch processing support.
 
 import hashlib
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
-from .base_cache import BaseCache, CacheEntry
+from .base_cache import BaseCache
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ class EmbeddingCache(BaseCache):
 def get_embedding_cache() -> EmbeddingCache:
     """Get the default embedding cache instance."""
     from .cache_factory import CacheFactory
-    return CacheFactory.get_cache("embedding", "default")
+    return cast(EmbeddingCache, CacheFactory.get_cache("embedding", "default"))
 
 
 # Backward compatibility: create a singleton instance for legacy code

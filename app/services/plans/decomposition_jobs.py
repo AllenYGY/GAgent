@@ -8,18 +8,17 @@ from collections import deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional
 
 from ...repository.plan_storage import (
     append_decomposition_job_log,
+    list_action_logs,
     load_decomposition_job,
     lookup_decomposition_job_entry,
     record_decomposition_job,
     register_decomposition_job_index,
     update_decomposition_job_status,
-    list_action_logs,
 )
-from .plan_decomposer import DecompositionResult
 
 if TYPE_CHECKING:  # pragma: no cover
     from .plan_decomposer import PlanDecomposer
@@ -42,7 +41,11 @@ def _to_iso(value: Optional[datetime]) -> Optional[str]:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     value = value.astimezone(timezone.utc)
-    return value.replace(microsecond=int(value.microsecond / 1000) * 1000).isoformat().replace("+00:00", "Z")
+    return (
+        value.replace(microsecond=int(value.microsecond / 1000) * 1000)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _normalize_metadata(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -240,7 +243,9 @@ class PlanDecompositionJobManager:
             job = self._jobs.get(job_id)
             return job
 
-    def get_job_payload(self, job_id: str, *, include_logs: bool = True) -> Optional[Dict[str, Any]]:
+    def get_job_payload(
+        self, job_id: str, *, include_logs: bool = True
+    ) -> Optional[Dict[str, Any]]:
         job = self.get_job(job_id)
         if job is not None:
             payload = job.to_payload(include_logs=include_logs)
@@ -456,9 +461,7 @@ class PlanDecompositionJobManager:
             if job is None:
                 return
             job.plan_id = plan_id
-            register_decomposition_job_index(
-                job_id, plan_id, job_type=job.job_type
-            )
+            register_decomposition_job_index(job_id, plan_id, job_type=job.job_type)
             record_decomposition_job(
                 plan_id,
                 job_id=job_id,
@@ -588,6 +591,7 @@ def execute_decomposition_job(
     expand_depth: Optional[int] = None,
     node_budget: Optional[int] = None,
     allow_existing_children: Optional[bool] = None,
+    allow_web_search: Optional[bool] = None,
 ) -> None:
     token = set_current_job(job_id)
     try:
@@ -595,7 +599,7 @@ def execute_decomposition_job(
         if mode == "plan_bfs":
             log_job_event(
                 "info",
-                "开始整体计划分解",
+                "Starting plan-wide decomposition",
                 {
                     "plan_id": plan_id,
                     "max_depth": max_depth,
@@ -606,11 +610,12 @@ def execute_decomposition_job(
                 plan_id,
                 max_depth=max_depth,
                 node_budget=node_budget,
+                allow_web_search=allow_web_search,
             )
         else:
             log_job_event(
                 "info",
-                "开始节点分解",
+                "Starting single node decomposition",
                 {
                     "plan_id": plan_id,
                     "task_id": task_id,
@@ -620,17 +625,20 @@ def execute_decomposition_job(
                 },
             )
             if task_id is None:
-                raise ValueError("task_id 必须在单节点分解模式下提供。")
+                raise ValueError(
+                    "task_id must be provided for single node decomposition."
+                )
             result = plan_decomposer.decompose_node(
                 plan_id,
                 task_id,
                 expand_depth=expand_depth,
                 node_budget=node_budget,
                 allow_existing_children=allow_existing_children,
+                allow_web_search=allow_web_search,
             )
         log_job_event(
             "info",
-            "任务拆分完成",
+            "Task decomposition completed successfully",
             {
                 "created_tasks": len(result.created_tasks),
                 "stopped_reason": result.stopped_reason,
@@ -644,7 +652,7 @@ def execute_decomposition_job(
     except Exception as exc:  # pragma: no cover - defensive
         log_job_event(
             "error",
-            "任务拆分失败",
+            "Task decomposition failed",
             {"error": str(exc)},
         )
         plan_decomposition_jobs.mark_failure(job_id, str(exc))
@@ -662,6 +670,7 @@ def start_decomposition_job_thread(
     expand_depth: Optional[int] = None,
     node_budget: Optional[int] = None,
     allow_existing_children: Optional[bool] = None,
+    allow_web_search: Optional[bool] = None,
 ) -> PlanDecompositionJob:
     params = {
         "mode": mode,
@@ -671,6 +680,7 @@ def start_decomposition_job_thread(
         "expand_depth": expand_depth,
         "node_budget": node_budget,
         "allow_existing_children": allow_existing_children,
+        "allow_web_search": allow_web_search,
     }
     job = plan_decomposition_jobs.create_job(
         plan_id=plan_id,
@@ -701,6 +711,7 @@ def start_decomposition_job_thread(
             "expand_depth": expand_depth,
             "node_budget": node_budget,
             "allow_existing_children": allow_existing_children,
+            "allow_web_search": allow_web_search,
         },
         daemon=True,
     )

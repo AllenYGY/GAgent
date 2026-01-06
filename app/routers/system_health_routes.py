@@ -11,7 +11,6 @@ import psutil
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..services.embeddings.vector_adapter import get_vector_adapter
 from ..services.storage.hybrid_vector_storage import get_hybrid_storage
 from . import register_router
 
@@ -232,7 +231,6 @@ def _determine_overall_status(components: Dict[str, Any]) -> str:
 async def get_vector_metrics():
     """获取向量系统详细性能指标"""
     try:
-        adapter = await get_vector_adapter()
         storage = await get_hybrid_storage()
 
         # 获取统计信息

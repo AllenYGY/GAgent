@@ -96,9 +96,9 @@ def get_job_status(job_id: str):
     action_logs = payload.get("action_logs") or []
     action_cursor = payload.get("action_cursor")
     return AsyncJobStatusResponse(
-        job_id=payload.get("job_id"),
+        job_id=str(payload.get("job_id") or job_id),
         job_type=payload.get("job_type") or "plan_decompose",
-        status=payload.get("status"),
+        status=payload.get("status") or "unknown",
         plan_id=payload.get("plan_id"),
         task_id=payload.get("task_id"),
         mode=payload.get("mode"),

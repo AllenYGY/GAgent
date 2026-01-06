@@ -52,7 +52,13 @@ ACTION_SCHEMAS: Dict[Tuple[str, str], Schema] = {
     ("task_operation", "delete_task"): {"required": {"task_id": int}, "optional": {}},
     ("task_operation", "decompose_task"): {
         "required": {},
-        "optional": {"task_id": int, "expand_depth": int, "node_budget": int, "allow_existing_children": bool},
+        "optional": {
+            "task_id": int,
+            "expand_depth": int,
+            "node_budget": int,
+            "allow_existing_children": bool,
+            "allow_web_search": bool,
+        },
     },
     ("task_operation", "show_tasks"): {"required": {}, "optional": {}},
     ("task_operation", "query_status"): {"required": {}, "optional": {}},

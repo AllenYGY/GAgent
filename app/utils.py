@@ -1,8 +1,6 @@
 import asyncio
 import json
 import re
-import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 def plan_prefix(title: str) -> str:
@@ -67,7 +65,6 @@ def run_async(coro):
             # Use executor instead of creating new thread with new event loop
             # This avoids the dangerous nested event loop pattern
             import concurrent.futures
-            import functools
             
             def _sync_runner():
                 # Create new event loop in executor thread

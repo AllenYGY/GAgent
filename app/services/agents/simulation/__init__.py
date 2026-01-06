@@ -4,6 +4,12 @@ Simulation agents package.
 Provides helpers to run the Simulated User Mode loop entirely in memory.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .orchestrator import SimulationOrchestrator
+    from .runtime import SimulationRegistry
+
 from .models import (  # noqa: F401
     ActionSpec,
     ChatAgentTurn,

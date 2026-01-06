@@ -72,7 +72,8 @@ def _load_text(path: Path) -> Iterable[PlanTopic]:
 def _load_csv(path: Path) -> Iterable[PlanTopic]:
     with path.open("r", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        if "title" not in reader.fieldnames and "goal" not in reader.fieldnames:
+        fieldnames = reader.fieldnames or []
+        if "title" not in fieldnames and "goal" not in fieldnames:
             raise ValueError("CSV must include a 'title' or 'goal' column.")
         for row in reader:
             title = (row.get("title") or row.get("goal") or "").strip()

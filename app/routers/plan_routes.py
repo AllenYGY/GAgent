@@ -36,6 +36,7 @@ def _run_decomposition_job(
     expand_depth: Optional[int],
     node_budget: Optional[int],
     allow_existing_children: Optional[bool],
+    allow_web_search: Optional[bool],
 ) -> None:
     """Background execution wrapper for async decomposition jobs."""
     execute_decomposition_job(
@@ -47,6 +48,7 @@ def _run_decomposition_job(
         expand_depth=expand_depth,
         node_budget=node_budget,
         allow_existing_children=allow_existing_children,
+        allow_web_search=allow_web_search,
     )
 
 
@@ -71,6 +73,9 @@ class DecomposeTaskRequest(BaseModel):
     node_budget: Optional[int] = Field(None, ge=1, description="此次分解允许创建的最大节点数")
     allow_existing_children: Optional[bool] = Field(
         None, description="是否允许在已有子任务的节点上继续追加子任务"
+    )
+    allow_web_search: Optional[bool] = Field(
+        None, description="是否允许在分解过程中调用 web search"
     )
     async_mode: bool = Field(
         False,
@@ -324,6 +329,7 @@ def decompose_task(
     expand_depth = request.expand_depth
     node_budget = request.node_budget
     allow_existing_children = request.allow_existing_children
+    allow_web_search = request.allow_web_search
 
     if request.async_mode:
         job = plan_decomposition_jobs.create_job(
@@ -334,6 +340,7 @@ def decompose_task(
                 "expand_depth": expand_depth,
                 "node_budget": node_budget,
                 "allow_existing_children": allow_existing_children,
+                "allow_web_search": allow_web_search,
             },
         )
         if background_tasks is None:
@@ -350,6 +357,7 @@ def decompose_task(
                 "expand_depth": expand_depth,
                 "node_budget": node_budget,
                 "allow_existing_children": allow_existing_children,
+                "allow_web_search": allow_web_search,
             },
         )
         background_tasks.add_task(
@@ -360,6 +368,7 @@ def decompose_task(
             expand_depth,
             node_budget,
             allow_existing_children,
+            allow_web_search,
         )
         message = (
             "任务拆分已提交到后台执行。你可以稍后查询 job 状态或刷新计划树查看进度。"
@@ -379,6 +388,7 @@ def decompose_task(
             expand_depth=expand_depth,
             node_budget=node_budget,
             allow_existing_children=allow_existing_children,
+            allow_web_search=allow_web_search,
         )
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -458,9 +468,9 @@ def get_decomposition_job_status(job_id: str):
     if payload is None:
         raise HTTPException(status_code=404, detail="未找到对应的拆分任务。")
     return DecompositionJobStatusResponse(
-        job_id=payload.get("job_id"),
+        job_id=str(payload.get("job_id") or job_id),
         job_type=payload.get("job_type") or "plan_decompose",
-        status=payload.get("status"),
+        status=payload.get("status") or "unknown",
         plan_id=payload.get("plan_id"),
         task_id=payload.get("task_id"),
         mode=payload.get("mode"),

@@ -3,31 +3,18 @@ Milvus向量数据库服务
 支持嵌入式部署，无需外部Docker服务
 """
 
-import os
-import json
-import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List
 from datetime import datetime
-import asyncio
 from pathlib import Path
 
 try:
-    from pymilvus import (
-        MilvusClient, 
-        FieldSchema, 
-        CollectionSchema, 
-        DataType,
-        connections
-    )
+    from pymilvus import MilvusClient, DataType
     PYMILVUS_AVAILABLE = True
 except ImportError:
     PYMILVUS_AVAILABLE = False
     # 创建占位符类
     MilvusClient = None
-    FieldSchema = None
-    CollectionSchema = None
     DataType = None
-    connections = None
 
 import logging
 
@@ -67,7 +54,11 @@ class MilvusVectorService:
             logger.info(f"🚀 初始化Milvus Lite: {self.uri}")
             
             # 创建Milvus Lite客户端
-            self.client = MilvusClient(uri=self.uri)
+            milvus_client = MilvusClient
+            if milvus_client is None:
+                logger.warning("MilvusClient不可用，跳过初始化")
+                return False
+            self.client = milvus_client(uri=self.uri)
             
             # 创建集合
             await self._create_collections()
@@ -90,29 +81,34 @@ class MilvusVectorService:
     
     async def _create_embedding_cache_collection(self):
         """创建嵌入缓存集合"""
+        if self.client is None or MilvusClient is None or DataType is None:
+            return
+        client = self.client
+        milvus_client = MilvusClient
+        data_type = DataType
         collection_name = self.collections["embedding_cache"]
         
-        if self.client.has_collection(collection_name):
+        if client.has_collection(collection_name):
             logger.info(f"集合 {collection_name} 已存在")
             return
         
         # 定义字段
-        schema = MilvusClient.create_schema(
+        schema = milvus_client.create_schema(
             auto_id=True,
             enable_dynamic_field=False
         )
         
         # 添加字段
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="text_hash", datatype=DataType.VARCHAR, max_length=64)
-        schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=1024)
-        schema.add_field(field_name="model", datatype=DataType.VARCHAR, max_length=50)
-        schema.add_field(field_name="created_at", datatype=DataType.INT64)
-        schema.add_field(field_name="access_count", datatype=DataType.INT64)
-        schema.add_field(field_name="last_accessed", datatype=DataType.INT64)
+        schema.add_field(field_name="id", datatype=data_type.INT64, is_primary=True)
+        schema.add_field(field_name="text_hash", datatype=data_type.VARCHAR, max_length=64)
+        schema.add_field(field_name="embedding", datatype=data_type.FLOAT_VECTOR, dim=1024)
+        schema.add_field(field_name="model", datatype=data_type.VARCHAR, max_length=50)
+        schema.add_field(field_name="created_at", datatype=data_type.INT64)
+        schema.add_field(field_name="access_count", datatype=data_type.INT64)
+        schema.add_field(field_name="last_accessed", datatype=data_type.INT64)
         
         # 创建集合
-        self.client.create_collection(
+        client.create_collection(
             collection_name=collection_name,
             schema=schema,
             metric_type="COSINE",  # 余弦相似度
@@ -120,7 +116,7 @@ class MilvusVectorService:
         )
         
         # 创建索引 (适配Milvus Lite)
-        index_params = self.client.prepare_index_params()
+        index_params = client.prepare_index_params()
         index_params.add_index(
             field_name="embedding",
             index_type="IVF_FLAT",  # Lite版本支持的索引类型
@@ -128,7 +124,7 @@ class MilvusVectorService:
             params={"nlist": 128}  # IVF_FLAT参数
         )
         
-        self.client.create_index(
+        client.create_index(
             collection_name=collection_name,
             index_params=index_params
         )
@@ -137,28 +133,33 @@ class MilvusVectorService:
     
     async def _create_task_embeddings_collection(self):
         """创建任务嵌入集合"""
+        if self.client is None or MilvusClient is None or DataType is None:
+            return
+        client = self.client
+        milvus_client = MilvusClient
+        data_type = DataType
         collection_name = self.collections["task_embeddings"]
         
-        if self.client.has_collection(collection_name):
+        if client.has_collection(collection_name):
             logger.info(f"集合 {collection_name} 已存在")
             return
         
         # 定义字段
-        schema = MilvusClient.create_schema(
+        schema = milvus_client.create_schema(
             auto_id=True,
             enable_dynamic_field=False
         )
         
         # 添加字段
-        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-        schema.add_field(field_name="task_id", datatype=DataType.INT64)
-        schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=1024)
-        schema.add_field(field_name="model", datatype=DataType.VARCHAR, max_length=50)
-        schema.add_field(field_name="created_at", datatype=DataType.INT64)
-        schema.add_field(field_name="updated_at", datatype=DataType.INT64)
+        schema.add_field(field_name="id", datatype=data_type.INT64, is_primary=True)
+        schema.add_field(field_name="task_id", datatype=data_type.INT64)
+        schema.add_field(field_name="embedding", datatype=data_type.FLOAT_VECTOR, dim=1024)
+        schema.add_field(field_name="model", datatype=data_type.VARCHAR, max_length=50)
+        schema.add_field(field_name="created_at", datatype=data_type.INT64)
+        schema.add_field(field_name="updated_at", datatype=data_type.INT64)
         
         # 创建集合
-        self.client.create_collection(
+        client.create_collection(
             collection_name=collection_name,
             schema=schema,
             metric_type="COSINE",
@@ -166,7 +167,7 @@ class MilvusVectorService:
         )
         
         # 创建索引 (适配Milvus Lite)
-        index_params = self.client.prepare_index_params()
+        index_params = client.prepare_index_params()
         index_params.add_index(
             field_name="embedding",
             index_type="IVF_FLAT",  # Lite版本支持的索引类型
@@ -174,7 +175,7 @@ class MilvusVectorService:
             params={"nlist": 128}  # IVF_FLAT参数
         )
         
-        self.client.create_index(
+        client.create_index(
             collection_name=collection_name,
             index_params=index_params
         )
@@ -189,6 +190,9 @@ class MilvusVectorService:
     ) -> bool:
         """存储嵌入缓存"""
         try:
+            if self.client is None:
+                return False
+            client = self.client
             collection_name = self.collections["embedding_cache"]
             
             data = [{
@@ -200,7 +204,7 @@ class MilvusVectorService:
                 "last_accessed": int(datetime.now().timestamp())
             }]
             
-            result = self.client.insert(
+            client.insert(
                 collection_name=collection_name,
                 data=data
             )
@@ -220,6 +224,9 @@ class MilvusVectorService:
     ) -> bool:
         """存储任务嵌入"""
         try:
+            if self.client is None:
+                return False
+            client = self.client
             collection_name = self.collections["task_embeddings"]
             
             data = [{
@@ -230,7 +237,7 @@ class MilvusVectorService:
                 "updated_at": int(datetime.now().timestamp())
             }]
             
-            result = self.client.insert(
+            client.insert(
                 collection_name=collection_name,
                 data=data
             )
@@ -250,11 +257,14 @@ class MilvusVectorService:
     ) -> List[Dict[str, Any]]:
         """搜索嵌入缓存"""
         try:
+            if self.client is None:
+                return []
+            client = self.client
             collection_name = self.collections["embedding_cache"]
             
             search_params = {"metric_type": "COSINE", "params": {"ef": 100}}
             
-            results = self.client.search(
+            results = client.search(
                 collection_name=collection_name,
                 data=[query_embedding],
                 limit=top_k,
@@ -290,11 +300,14 @@ class MilvusVectorService:
     ) -> List[Dict[str, Any]]:
         """搜索相似任务"""
         try:
+            if self.client is None:
+                return []
+            client = self.client
             collection_name = self.collections["task_embeddings"]
             
             search_params = {"metric_type": "COSINE", "params": {"ef": 100}}
             
-            results = self.client.search(
+            results = client.search(
                 collection_name=collection_name,
                 data=[query_embedding],
                 limit=top_k,
@@ -324,15 +337,18 @@ class MilvusVectorService:
     async def get_collection_stats(self) -> Dict[str, Any]:
         """获取集合统计信息"""
         try:
+            if self.client is None:
+                return {}
+            client = self.client
             stats = {}
             
             for collection_type, collection_name in self.collections.items():
-                if self.client.has_collection(collection_name):
+                if client.has_collection(collection_name):
                     # 获取集合信息
-                    info = self.client.describe_collection(collection_name)
+                    info = client.describe_collection(collection_name)
                     
                     # 获取记录数量
-                    query_result = self.client.query(
+                    query_result = client.query(
                         collection_name=collection_name,
                         expr="id >= 0",
                         output_fields=["count(*)"]

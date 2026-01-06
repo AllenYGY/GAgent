@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ...interfaces import TaskRepository
 from ...repository.tasks import default_repo
 from .base import execute_task as base_execute_task
 from ...utils import split_prefix
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 class ToolEnhancedExecutor:
     """Tool-enhanced executor with intelligent tool integration"""
 
-    def __init__(self, repo: Optional[TaskRepository] = None):
+    def __init__(self, repo: Optional[Any] = None):
         self.repo = repo or default_repo
         self.tool_router = None
         self._initialized = False
@@ -35,6 +34,22 @@ class ToolEnhancedExecutor:
             Path(self.base_dir).mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+
+    def _require_task_id(self, task) -> int:
+        if isinstance(task, dict):
+            task_id = task.get("id")
+        else:
+            task_id = task[0]
+        if task_id is None:
+            raise ValueError("Task id is missing")
+        return int(task_id)
+
+    def _get_task_name(self, task) -> str:
+        if isinstance(task, dict):
+            name = task.get("name")
+        else:
+            name = task[1] if len(task) > 1 else None
+        return str(name or "Untitled")
 
     async def initialize(self):
         """Initialize the tool-enhanced executor"""
@@ -107,14 +122,19 @@ class ToolEnhancedExecutor:
         if not self._initialized:
             await self.initialize()
 
+        task_id = None
+        task_name = "Untitled"
         try:
             # Get task information
-            task_id = task.get("id") if isinstance(task, dict) else task[0]
-            task_name = task.get("name") if isinstance(task, dict) else task[1]
+            task_id = self._require_task_id(task)
+            task_name = self._get_task_name(task)
 
             # Get task prompt for tool analysis
-            task_prompt = self.repo.get_task_input_prompt(task_id)
-            if not task_prompt:
+            get_prompt = getattr(self.repo, "get_task_input_prompt", None)
+            task_prompt_value = get_prompt(task_id) if callable(get_prompt) else None
+            if isinstance(task_prompt_value, str) and task_prompt_value.strip():
+                task_prompt = task_prompt_value
+            else:
                 task_prompt = f"Complete the task: {task_name}"
 
             logger.info(f"Analyzing task {task_id} for tool requirements")
@@ -264,25 +284,30 @@ class ToolEnhancedExecutor:
 
     async def _build_routing_context(self, task, context_options) -> Dict[str, Any]:
         """Build context for tool routing"""
-        task_id = task.get("id") if isinstance(task, dict) else task[0]
-        task_name = task.get("name") if isinstance(task, dict) else task[1]
+        task_id = self._require_task_id(task)
+        task_name = self._get_task_name(task)
+        task_type = task.get("task_type", "atomic") if isinstance(task, dict) else "atomic"
+        depth = task.get("depth", 0) if isinstance(task, dict) else 0
 
         routing_context = {
             "task_id": task_id,
             "task_name": task_name,
-            "task_type": task.get("task_type", "atomic"),
-            "depth": task.get("depth", 0),
+            "task_type": task_type,
+            "depth": depth,
             "context_enabled": bool(context_options),
         }
 
         # Add dependency information if available
         try:
-            dependencies = self.repo.list_dependencies(task_id)
-            if dependencies:
-                routing_context["dependencies"] = [
-                    {"id": dep.get("id"), "name": dep.get("name"), "kind": dep.get("kind")}
-                    for dep in dependencies[:3]  # Limit to avoid context overflow
-                ]
+            list_deps = getattr(self.repo, "list_dependencies", None)
+            deps_raw = list_deps(task_id) if callable(list_deps) else []
+            if isinstance(deps_raw, list):
+                deps = [dep for dep in deps_raw if isinstance(dep, dict)]
+                if deps:
+                    routing_context["dependencies"] = [
+                        {"id": dep.get("id"), "name": dep.get("name"), "kind": dep.get("kind")}
+                        for dep in deps[:3]  # Limit to avoid context overflow
+                    ]
         except Exception:
             pass
 
@@ -293,7 +318,7 @@ class ToolEnhancedExecutor:
         from tool_box import execute_tool
 
         tool_outputs = []
-        task_id = task.get("id") if isinstance(task, dict) else task[0]
+        task_id = self._require_task_id(task)
 
         for call in tool_calls:
             try:
@@ -418,8 +443,6 @@ class ToolEnhancedExecutor:
 
         # Add tool context to existing context options
         if tool_context_parts:
-            tool_context = "\n\n".join(tool_context_parts)
-
             # CRITICAL FIX: Properly integrate tool context into the context system
             # The base executor expects context in the bundle format
             enhanced_options["tool_enhanced"] = True
@@ -467,7 +490,7 @@ class ToolEnhancedExecutor:
     ):
         """Record tool usage for future learning and analysis"""
         try:
-            task_id = task.get("id") if isinstance(task, dict) else task[0]
+            task_id = self._require_task_id(task)
 
             # Create tool usage record
             usage_record = {
@@ -484,9 +507,10 @@ class ToolEnhancedExecutor:
             logger.info(f"Tool usage recorded for task {task_id}: {usage_record}")
 
             # Store in database if repo supports it
-            if hasattr(self.repo, "store_tool_usage_log"):
+            store_log = getattr(self.repo, "store_tool_usage_log", None)
+            if callable(store_log):
                 try:
-                    self.repo.store_tool_usage_log(task_id, usage_record)
+                    store_log(task_id, usage_record)
                 except Exception as e:
                     logger.warning(f"Failed to store tool usage log: {e}")
 
@@ -511,8 +535,9 @@ class ToolEnhancedExecutor:
         """Execute tools that need the generated content (like file_operations). Returns list of saved file paths."""
         try:
             # Get the generated content
-            generated_content = self.repo.get_task_output_content(task_id)
-            if not generated_content:
+            get_output = getattr(self.repo, "get_task_output_content", None)
+            generated_content = get_output(task_id) if callable(get_output) else None
+            if not isinstance(generated_content, str) or not generated_content:
                 logger.warning(f"No content available for post-generation tools in task {task_id}")
                 return []
 
@@ -567,15 +592,20 @@ class ToolEnhancedExecutor:
     async def _materialize_atomic_output(self, task) -> None:
         """Ensure ATOMIC task output is written to its .md path from DB output, even if base executor was used."""
         try:
-            task_id = task.get("id") if isinstance(task, dict) else task[0]
-            task_info = task if isinstance(task, dict) else self.repo.get_task_info(task_id)
-            if not task_info:
+            task_id = self._require_task_id(task)
+            if isinstance(task, dict):
+                task_info = task
+            else:
+                get_info = getattr(self.repo, "get_task_info", None)
+                task_info = get_info(task_id) if callable(get_info) else None
+            if not isinstance(task_info, dict):
                 return
-            task_type = task_info.get("task_type") if isinstance(task_info, dict) else None
+            task_type = task_info.get("task_type")
             if task_type != "atomic":
                 return
-            content = self.repo.get_task_output_content(task_id)
-            if not content:
+            get_output = getattr(self.repo, "get_task_output_content", None)
+            content = get_output(task_id) if callable(get_output) else None
+            if not isinstance(content, str) or not content:
                 return
             file_path = get_task_file_path(task_info, self.repo)
             ensure_task_directory(file_path)
@@ -591,21 +621,35 @@ class ToolEnhancedExecutor:
     async def _maybe_assemble_upstream(self, task_id: int) -> None:
         """If an ATOMIC task just finished, assemble its composite and possibly root when eligible."""
         try:
-            task = self.repo.get_task_info(task_id)
-            if not task or (task.get("task_type") != "atomic"):
+            get_info = getattr(self.repo, "get_task_info", None)
+            if not callable(get_info):
+                return
+            task = get_info(task_id)
+            if not isinstance(task, dict) or (task.get("task_type") != "atomic"):
                 return
 
             # Check composite parent
-            parent = self.repo.get_parent(task_id)
-            if not parent or parent.get("task_type") != "composite":
+            get_parent = getattr(self.repo, "get_parent", None)
+            if not callable(get_parent):
+                return
+            parent = get_parent(task_id)
+            if not isinstance(parent, dict) or parent.get("task_type") != "composite":
+                return
+            parent_id = parent.get("id")
+            if parent_id is None:
                 return
 
             # All atomic children done/completed?
-            children = self.repo.get_children(parent["id"])
-            if not children:
+            get_children = getattr(self.repo, "get_children", None)
+            if not callable(get_children):
+                return
+            children = get_children(parent_id)
+            if not isinstance(children, list) or not children:
                 return
             all_atomic_done = True
             for ch in children:
+                if not isinstance(ch, dict):
+                    continue
                 if ch.get("task_type") == "atomic" and ch.get("status") not in {"done", "completed"}:
                     all_atomic_done = False
                     break
@@ -615,20 +659,28 @@ class ToolEnhancedExecutor:
             # Assemble composite summary (always re-assemble to capture latest changes)
             # This ensures that if any atomic task is re-executed, the composite summary is updated
             try:
-                CompositeAssembler(self.repo).assemble(parent["id"], strategy="llm", force_real=True)
+                CompositeAssembler(self.repo).assemble(parent_id, strategy="llm", force_real=True)
                 logger.info("Composite %s (re-)assembled from all atomic children", parent.get("id"))
             except Exception as e:
                 logger.warning("Composite assembly failed for %s: %s", parent.get("id"), e)
                 return
 
             # Check root readiness
-            root_parent = self.repo.get_parent(parent["id"])
-            if not root_parent or root_parent.get("task_type") != "root":
+            root_parent = get_parent(parent_id)
+            if not isinstance(root_parent, dict) or root_parent.get("task_type") != "root":
                 return
-            comps = self.repo.get_children(root_parent["id"])
-            if comps and all((c.get("task_type") != "composite" or c.get("status") == "completed") for c in comps):
+            root_id = root_parent.get("id")
+            if root_id is None:
+                return
+            comps = get_children(root_id)
+            if not isinstance(comps, list):
+                comps = []
+            if comps and all(
+                (isinstance(c, dict) and (c.get("task_type") != "composite" or c.get("status") == "completed"))
+                for c in comps
+            ):
                 try:
-                    RootAssembler(self.repo).assemble(root_parent["id"], strategy="llm", force_real=True)
+                    RootAssembler(self.repo).assemble(root_id, strategy="llm", force_real=True)
                     logger.info("Root %s assembled from all composite children", root_parent.get("id"))
                 except Exception as e:
                     logger.warning("Root assembly failed for %s: %s", root_parent.get("id"), e)
@@ -639,8 +691,9 @@ class ToolEnhancedExecutor:
         """Check theme consistency and perform one-time correction if needed. Returns True if corrected."""
         try:
             # Get generated content
-            content = self.repo.get_task_output_content(task_id)
-            if not content or len(content) < 100:
+            get_output = getattr(self.repo, "get_task_output_content", None)
+            content = get_output(task_id) if callable(get_output) else None
+            if not isinstance(content, str) or len(content) < 100:
                 return False
             
             # Get root task info
@@ -648,8 +701,11 @@ class ToolEnhancedExecutor:
             if not root:
                 return False
             
-            root_name = root.get("name", "")
-            root_prompt = self.repo.get_task_input_prompt(root.get("id")) or ""
+            root_name = str(root.get("name", ""))
+            root_id = root.get("id")
+            get_prompt = getattr(self.repo, "get_task_input_prompt", None)
+            root_prompt_value = get_prompt(root_id) if callable(get_prompt) and root_id is not None else ""
+            root_prompt = root_prompt_value if isinstance(root_prompt_value, str) else ""
             
             # Build consistency check prompt
             check_prompt = f"""Evaluate whether the following content stays aligned with the ROOT topic. Provide a score (0-10) and a brief explanation.
@@ -671,7 +727,7 @@ Respond in JSON:
             # Call LLM for consistency check
             from app.services.llm.llm_service import get_llm_service
             llm = get_llm_service()
-            check_result = await llm.generate_async(check_prompt, temperature=0.1, max_tokens=500)
+            check_result = await llm.chat_async(check_prompt, temperature=0.1, max_tokens=500)
             
             # Parse result
             import json
@@ -710,10 +766,12 @@ When rewriting, make sure to:
 Rewritten content:"""
                 
                 # Generate corrected content
-                corrected = await llm.generate_async(correction_prompt, temperature=0.3, max_tokens=2000)
+                corrected = await llm.chat_async(correction_prompt, temperature=0.3, max_tokens=2000)
                 
                 # Update task output
-                self.repo.upsert_task_output(task_id, corrected)
+                upsert_output = getattr(self.repo, "upsert_task_output", None)
+                if callable(upsert_output):
+                    upsert_output(task_id, corrected)
                 logger.info(f"Task {task_id} content corrected (original score: {score})")
                 return True
             
@@ -726,13 +784,18 @@ Rewritten content:"""
     def _find_root_for_correction(self, task_id: int) -> Optional[Dict[str, Any]]:
         """Find root task for theme correction"""
         try:
-            current = self.repo.get_task_info(task_id)
+            get_info = getattr(self.repo, "get_task_info", None)
+            current = get_info(task_id) if callable(get_info) else None
             guard = 0
-            while current and guard < 100:
+            while isinstance(current, dict) and guard < 100:
                 if current.get("task_type") == "root":
                     return current
-                parent = self.repo.get_parent(current.get("id"))
-                if not parent:
+                parent_id = current.get("id")
+                if parent_id is None:
+                    break
+                get_parent = getattr(self.repo, "get_parent", None)
+                parent = get_parent(parent_id) if callable(get_parent) else None
+                if not isinstance(parent, dict):
                     break
                 current = parent
                 guard += 1
@@ -744,7 +807,7 @@ Rewritten content:"""
 # Convenience function for enhanced execution
 async def execute_task_with_tools(
     task,
-    repo: Optional[TaskRepository] = None,
+    repo: Optional[Any] = None,
     use_context: bool = True,
     context_options: Optional[Dict[str, Any]] = None,
 ) -> str:
@@ -806,7 +869,7 @@ def execute_task_enhanced(task, repo=None, use_context=True, context_options=Non
 # New: combined path — tool-enhanced context + evaluation-driven execution
 async def execute_task_with_tools_and_evaluation(
     task,
-    repo: Optional[TaskRepository] = None,
+    repo: Optional[Any] = None,
     evaluation_mode: str = "llm",  # 'llm' | 'multi_expert' | 'adversarial'
     max_iterations: int = 3,
     quality_threshold: float = 0.8,
@@ -829,12 +892,15 @@ async def execute_task_with_tools_and_evaluation(
     await executor.initialize()
 
     # Get task basic info
-    task_id = task.get("id") if isinstance(task, dict) else task[0]
-    task_name = task.get("name") if isinstance(task, dict) else task[1]
+    task_id = executor._require_task_id(task)
+    task_name = executor._get_task_name(task)
 
     # Build task prompt
-    task_prompt = repo.get_task_input_prompt(task_id)
-    if not task_prompt:
+    get_prompt = getattr(repo, "get_task_input_prompt", None)
+    task_prompt_value = get_prompt(task_id) if callable(get_prompt) else None
+    if isinstance(task_prompt_value, str) and task_prompt_value.strip():
+        task_prompt = task_prompt_value
+    else:
         task_prompt = f"Complete the task: {task_name}"
 
     # Phase 1: Analyze and route
@@ -902,39 +968,17 @@ async def execute_task_with_tools_and_evaluation(
     # Phase 3: Enhance context with tool results
     enhanced_context_options = await executor._enhance_context_with_tools(context_options, tool_outputs, tool_analysis)
 
-    # Phase 4: Evaluation-driven generation
-    from .enhanced import execute_task_with_adversarial_evaluation as _exec_adv
+    # Phase 4: Single-pass generation (evaluation disabled)
     from .enhanced import execute_task_with_evaluation as _exec_eval
-    from .enhanced import execute_task_with_multi_expert_evaluation as _exec_multi
 
-    mode = (evaluation_mode or "llm").strip().lower()
-    if mode == "multi_expert":
-        result = _exec_multi(
-            task=task,
-            repo=repo,
-            max_iterations=max_iterations,
-            quality_threshold=quality_threshold,
-            use_context=use_context,
-            context_options=enhanced_context_options,
-        )
-    elif mode == "adversarial":
-        result = _exec_adv(
-            task=task,
-            repo=repo,
-            max_iterations=max_iterations,
-            quality_threshold=quality_threshold,
-            use_context=use_context,
-            context_options=enhanced_context_options,
-        )
-    else:  # default LLM evaluation
-        result = _exec_eval(
-            task=task,
-            repo=repo,
-            max_iterations=max_iterations,
-            quality_threshold=quality_threshold,
-            use_context=use_context,
-            context_options=enhanced_context_options,
-        )
+    result = _exec_eval(
+        task=task,
+        repo=repo,
+        max_iterations=max_iterations,
+        quality_threshold=quality_threshold,
+        use_context=use_context,
+        context_options=enhanced_context_options,
+    )
 
     # Phase 5: Post-generation output tools
     saved_files: List[str] = []

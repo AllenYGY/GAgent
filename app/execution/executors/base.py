@@ -1,19 +1,16 @@
-import asyncio
 import logging
 import threading
 from typing import Any, Dict, Optional
 
-from ...interfaces import TaskRepository
 from ...llm import get_default_client
 from ...repository.tasks import default_repo
-from ...services.context import gather_context
 from ...services.context.context_budget import apply_budget
 from ...services.embeddings import get_embeddings_service
 
 logger = logging.getLogger(__name__)
 
 
-def _get_task_id_and_name(task):
+def _get_task_id_and_name(task) -> tuple[int, str]:
     """Support both sqlite3.Row (mapping) and tuple-style rows."""
     try:
         task_id = task["id"]  # sqlite3.Row mapping
@@ -21,10 +18,12 @@ def _get_task_id_and_name(task):
     except Exception:
         task_id = task[0]
         name = task[1]
-    return task_id, name
+    if task_id is None:
+        raise ValueError("Task id is missing")
+    return int(task_id), str(name)
 
 
-def _fetch_prompt(task_id, default_prompt, repo: TaskRepository):
+def _fetch_prompt(task_id: int, default_prompt: str, repo: Any) -> str:
     prompt = repo.get_task_input_prompt(task_id)
     return prompt if (isinstance(prompt, str) and prompt.strip()) else default_prompt
 
@@ -36,7 +35,7 @@ def _glm_chat(prompt: str) -> str:
     return client.chat(prompt, force_real=True)
 
 
-def _generate_task_embedding_async(task_id: int, content: str, repo: TaskRepository):
+def _generate_task_embedding_async(task_id: int, content: str, repo: Any) -> None:
     """Asynchronously generate and store task embedding"""
 
     def _background_embedding():
@@ -46,10 +45,12 @@ def _generate_task_embedding_async(task_id: int, content: str, repo: TaskReposit
                 return
 
             # Check if embedding already exists
-            existing_embedding = repo.get_task_embedding(task_id)
-            if existing_embedding:
-                logger.debug(f"Task {task_id} already has embedding, skipping generation")
-                return
+            get_embedding = getattr(repo, "get_task_embedding", None)
+            if callable(get_embedding):
+                existing_embedding = get_embedding(task_id)
+                if existing_embedding:
+                    logger.debug(f"Task {task_id} already has embedding, skipping generation")
+                    return
 
             embeddings_service = get_embeddings_service()
 
@@ -60,8 +61,10 @@ def _generate_task_embedding_async(task_id: int, content: str, repo: TaskReposit
             if embedding:
                 # Store embedding
                 embedding_json = embeddings_service.embedding_to_json(embedding)
-                repo.store_task_embedding(task_id, embedding_json)
-                logger.debug(f"Successfully stored embedding for task {task_id}")
+                store_embedding = getattr(repo, "store_task_embedding", None)
+                if callable(store_embedding):
+                    store_embedding(task_id, embedding_json)
+                    logger.debug(f"Successfully stored embedding for task {task_id}")
             else:
                 logger.warning(f"Failed to generate embedding for task {task_id}")
 
@@ -75,7 +78,7 @@ def _generate_task_embedding_async(task_id: int, content: str, repo: TaskReposit
 
 def execute_task(
     task,
-    repo: Optional[TaskRepository] = None,
+    repo: Optional[Any] = None,
     use_context: bool = False,
     context_options: Optional[Dict[str, Any]] = None,
 ):
@@ -89,60 +92,44 @@ def execute_task(
     )
     prompt = _fetch_prompt(task_id, default_prompt, repo)
 
-    # Optionally gather and prepend contextual information
+    # Optionally include provided context bundle (legacy gather_context removed).
+    bundle = None
+    ctx = None
+    include_deps = True
+    include_plan = True
+    k = 5
+    manual = None
+    semantic_k = None
+    min_similarity = None
+    max_chars_i = None
+    per_section_max_i = None
+    strategy = None
+
     if use_context:
         opts: Dict[str, Any] = context_options or {}
         try:
-            # Selection options
             include_deps = bool(opts.get("include_deps", True))
             include_plan = bool(opts.get("include_plan", True))
             try:
                 k = int(opts.get("k", 5))
             except Exception:
                 k = 5
-            # GLM semantic retrieval options
-            try:
-                semantic_k = int(opts.get("semantic_k")) if (opts.get("semantic_k") is not None) else None
-            except Exception:
-                semantic_k = None
-            try:
-                min_similarity = float(opts.get("min_similarity")) if (opts.get("min_similarity") is not None) else None
-            except Exception:
-                min_similarity = None
-            manual = None
-            mids = opts.get("manual")
-            if isinstance(mids, list):
-                try:
-                    manual = [int(x) for x in mids]
-                except Exception:
-                    manual = None
-
-            bundle = gather_context(
-                task_id,
-                repo=repo,
-                include_deps=include_deps,
-                include_plan=include_plan,
-                k=k,
-                manual=manual,
-                semantic_k=semantic_k,
-                min_similarity=min_similarity,
-            )
-            # Budget options (apply defaults if none provided)
-            max_chars = opts.get("max_chars")
-            per_section_max = opts.get("per_section_max")
+            manual = opts.get("manual") if isinstance(opts.get("manual"), list) else None
+            semantic_k = opts.get("semantic_k")
+            min_similarity = opts.get("min_similarity")
             strategy = opts.get("strategy") if isinstance(opts.get("strategy"), str) else None
 
-            def _int_env(name: str, default_val: int) -> int:
-                try:
-                    import os as _os
+            combined = opts.get("combined")
+            sections = opts.get("sections", [])
+            if isinstance(combined, str) or isinstance(sections, list):
+                bundle = {
+                    "combined": combined or "",
+                    "sections": sections if isinstance(sections, list) else [],
+                }
 
-                    v = _os.environ.get(name)
-                    return int(v) if v is not None and str(v).strip() != "" else int(default_val)
-                except Exception:
-                    return int(default_val)
-
-            # Determine effective caps
-            if (max_chars is not None) or (per_section_max is not None):
+            if bundle is not None:
+                max_chars = opts.get("max_chars")
+                per_section_max = opts.get("per_section_max")
                 try:
                     max_chars_i = int(max_chars) if max_chars is not None else None
                 except Exception:
@@ -151,27 +138,19 @@ def execute_task(
                     per_section_max_i = int(per_section_max) if per_section_max is not None else None
                 except Exception:
                     per_section_max_i = None
-                bundle = apply_budget(
-                    bundle,
-                    max_chars=max_chars_i,
-                    per_section_max=per_section_max_i,
-                    strategy=strategy or "truncate",
-                )
-            else:
-                # Apply safe defaults when use_context=true but no budget provided
-                default_total = _int_env("CONTEXT_DEFAULT_MAX_CHARS", 6000)
-                default_per_sec = _int_env("CONTEXT_DEFAULT_PER_SECTION", 1200)
-                default_strategy = strategy or ("sentence" if default_total or default_per_sec else "truncate")
-                bundle = apply_budget(
-                    bundle,
-                    max_chars=default_total,
-                    per_section_max=default_per_sec,
-                    strategy=default_strategy,
-                )
+
+                if max_chars_i is not None or per_section_max_i is not None:
+                    bundle = apply_budget(
+                        bundle,
+                        max_chars=max_chars_i,
+                        per_section_max=per_section_max_i,
+                        strategy=strategy or "truncate",
+                    )
 
             ctx = bundle.get("combined") if isinstance(bundle, dict) else None
         except Exception:
             ctx = None
+
         if ctx:
             prompt = f"[Context]\n\n{ctx}\n\n[Task Instruction]\n\n{prompt}"
 
@@ -188,27 +167,30 @@ def execute_task(
                         "manual": manual,
                         "semantic_k": semantic_k,
                         "min_similarity": min_similarity,
-                        "max_chars": (max_chars_i if "max_chars_i" in locals() else None),
-                        "per_section_max": (per_section_max_i if "per_section_max_i" in locals() else None),
-                        "strategy": (strategy or "truncate") if strategy else None,
+                        "max_chars": max_chars_i,
+                        "per_section_max": per_section_max_i,
+                        "strategy": strategy or "truncate",
                     },
                 }
-                # Attach budget info if present
                 if "budget_info" in bundle:
                     meta["budget_info"] = bundle["budget_info"]
-                try:
-                    repo.upsert_task_context(
-                        task_id, bundle.get("combined", ""), bundle.get("sections", []), meta, label=label
+                upsert_context = getattr(repo, "upsert_task_context", None)
+                if callable(upsert_context):
+                    upsert_context(
+                        task_id,
+                        bundle.get("combined", ""),
+                        bundle.get("sections", []),
+                        meta,
+                        label=label,
                     )
-                except Exception:
-                    # Repository may not implement snapshots; ignore silently
-                    pass
         except Exception:
             pass
 
     try:
         content = _glm_chat(prompt)
-        repo.upsert_task_output(task_id, content)
+        upsert_output = getattr(repo, "upsert_task_output", None)
+        if callable(upsert_output):
+            upsert_output(task_id, content)
         logger.info(f"Task {task_id} ({name}) done.")
 
         # Asynchronously generate embedding (optional)

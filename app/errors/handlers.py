@@ -5,23 +5,15 @@
 遵循SOLID原则和DRY原则
 """
 
-import sys
 import traceback
-from dataclasses import dataclass
+from functools import wraps
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, cast
 
 from .exceptions import (
-    AuthenticationError,
-    AuthorizationError,
     BaseError,
-    BusinessError,
-    DatabaseError,
-    ErrorCategory,
-    ErrorCode,
     ErrorSeverity,
-    ExternalServiceError,
-    NetworkError,
     SystemError,
     ValidationError,
 )
@@ -46,15 +38,9 @@ class ErrorResponse:
     category: str = ""
     severity: str = ""
     timestamp: str = ""
-    context: Dict[str, Any] = None
-    suggestions: List[str] = None
+    context: Dict[str, Any] = field(default_factory=dict)
+    suggestions: List[str] = field(default_factory=list)
     debug_info: Optional[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        if self.context is None:
-            self.context = {}
-        if self.suggestions is None:
-            self.suggestions = []
 
 
 class ErrorResponseFormatter:
@@ -283,22 +269,23 @@ log_error_handler = ErrorHandler(OutputFormat.LOG)
 
 def handle_api_error(exception: Exception, include_debug: bool = False) -> Dict[str, Any]:
     """API错误处理便捷函数"""
-    return api_error_handler.handle_exception(exception, include_debug=include_debug)
+    return cast(
+        Dict[str, Any],
+        api_error_handler.handle_exception(exception, include_debug=include_debug),
+    )
 
 
 def handle_cli_error(exception: Exception, verbose: bool = False) -> str:
     """CLI错误处理便捷函数"""
-    return cli_error_handler.handle_exception(exception, verbose=verbose)
+    return cast(str, cli_error_handler.handle_exception(exception, verbose=verbose))
 
 
 def handle_log_error(exception: Exception) -> Dict[str, Any]:
     """日志错误处理便捷函数"""
-    return log_error_handler.handle_exception(exception)
+    return cast(Dict[str, Any], log_error_handler.handle_exception(exception))
 
 
 # 错误处理装饰器，实现AOP模式
-
-from functools import wraps
 
 
 def handle_errors(output_format: OutputFormat = OutputFormat.JSON, reraise: bool = False, log_errors: bool = True):

@@ -8,15 +8,13 @@ enabling concurrent processing of multiple tasks for improved performance.
 import asyncio
 import logging
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..interfaces import TaskRepository
-from ..models import TaskExecutionResult, EvaluationResult, EvaluationDimensions
+from ..models import TaskExecutionResult
 from ..repository.tasks import default_repo
 from ..services.embeddings import get_embeddings_service
-from ..services.llm.llm_service import get_llm_service, TaskPromptBuilder, AsyncLLMContext
-from ..services.evaluation.content_evaluator import ContentEvaluator
+from ..services.llm.llm_service import get_llm_service, TaskPromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -155,75 +153,9 @@ class AsyncTaskExecutor:
         context_options: Optional[Dict[str, Any]] = None
     ) -> TaskExecutionResult:
         """
-        Execute task with iterative evaluation and improvement
-        
-        Args:
-            task: Task to execute
-            max_iterations: Maximum improvement iterations
-            quality_threshold: Minimum quality score
-            use_context: Whether to use context
-            context_options: Context configuration
-            
-        Returns:
-            TaskExecutionResult with evaluation details
+        Execute task without evaluation (evaluation module removed).
         """
-        async with self.semaphore:
-            start_time = time.time()
-            task_id, task_name = self._extract_task_info(task)
-            
-            logger.info(f"Starting async execution with evaluation for task {task_id}")
-            
-            evaluator = ContentEvaluator()
-            current_content = None
-            evaluation_result = None
-            
-            for iteration in range(max_iterations):
-                try:
-                    # Build prompt based on iteration
-                    if iteration == 0:
-                        prompt = await self._build_task_prompt(task_id, task_name, use_context, context_options)
-                    else:
-                        # Build revision prompt with feedback
-                        feedback = evaluation_result.suggestions if evaluation_result else []
-                        prompt = self.prompt_builder.build_revision_prompt(
-                            task_name=task_name,
-                            current_content=current_content,
-                            feedback=feedback
-                        )
-                    
-                    # Execute LLM asynchronously
-                    current_content = await self.llm_service.chat_async(prompt)
-                    
-                    # Evaluate content asynchronously
-                    evaluation_result = await self._evaluate_content_async(
-                        current_content, task_name, evaluator, iteration
-                    )
-                    
-                    # Check if quality threshold is met
-                    if evaluation_result.overall_score >= quality_threshold:
-                        logger.info(f"Task {task_id} reached quality threshold at iteration {iteration + 1}")
-                        break
-                        
-                except Exception as e:
-                    logger.error(f"Iteration {iteration + 1} failed for task {task_id}: {e}")
-                    continue
-            
-            # Store final results
-            await self._store_results(task_id, current_content)
-            
-            # Generate embeddings asynchronously
-            asyncio.create_task(self._generate_embedding(task_id, current_content))
-            
-            execution_time = time.time() - start_time
-            
-            return TaskExecutionResult(
-                task_id=task_id,
-                status="done",
-                content=current_content,
-                evaluation=evaluation_result,
-                iterations=iteration + 1,
-                execution_time=execution_time
-            )
+        return await self.execute_task(task, use_context=use_context, context_options=context_options)
     
     async def _build_task_prompt(
         self,
@@ -249,11 +181,11 @@ class AsyncTaskExecutor:
             context=context
         )
     
-    async def _build_context(self, task_id: int, context_options: Dict[str, Any]) -> str:
+    async def _build_context(self, task_id: int, context_options: Dict[str, Any]) -> Optional[str]:
         """Build context from options (simplified for now)"""
         # This is a simplified version - full implementation would integrate
         # with the existing context building system
-        context_parts = []
+        context_parts: List[str] = []
         
         if context_options.get("include_deps"):
             # Would fetch dependencies here
@@ -264,37 +196,6 @@ class AsyncTaskExecutor:
             context_parts.append("Plan context: [simplified context]")
         
         return "\n".join(context_parts) if context_parts else None
-    
-    async def _evaluate_content_async(
-        self,
-        content: str,
-        task_name: str,
-        evaluator: ContentEvaluator,
-        iteration: int
-    ) -> EvaluationResult:
-        """Evaluate content asynchronously"""
-        # Run evaluation in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        
-        def evaluate():
-            return evaluator.evaluate_content(
-                content=content,
-                task_context={"name": task_name},
-                iteration=iteration
-            )
-        
-        result = await loop.run_in_executor(None, evaluate)
-        
-        # Ensure result is in expected format
-        if isinstance(result, dict):
-            return EvaluationResult(
-                overall_score=result.get("overall_score", 0.0),
-                dimensions=EvaluationDimensions(**result.get("dimensions", {})),
-                suggestions=result.get("suggestions", []),
-                needs_revision=result.get("needs_revision", False),
-                iteration=iteration
-            )
-        return result
     
     async def _store_results(self, task_id: int, content: str):
         """Store task results asynchronously"""
@@ -339,7 +240,9 @@ class AsyncTaskExecutor:
                     if embedding:
                         import json
                         embedding_str = json.dumps(embedding) if isinstance(embedding, list) else str(embedding)
-                        self.repo.store_task_embedding(task_id, embedding_str)
+                        store_embedding = getattr(self.repo, "store_task_embedding", None)
+                        if callable(store_embedding):
+                            store_embedding(task_id, embedding_str)
                         logger.debug(f"Generated embedding for task {task_id}")
                 except Exception as e:
                     logger.warning(f"Failed to generate embedding for task {task_id}: {e}")
@@ -352,11 +255,16 @@ class AsyncTaskExecutor:
     def _extract_task_info(self, task) -> Tuple[int, str]:
         """Extract task ID and name from task object"""
         if hasattr(task, "id") and hasattr(task, "name"):
-            return task.id, task.name
+            task_id = task.id
+            name = task.name
         elif isinstance(task, dict):
-            return task.get("id"), task.get("name", "Untitled")
+            task_id = task.get("id")
+            name = task.get("name") or "Untitled"
         else:
             raise ValueError(f"Invalid task format: {type(task)}")
+        if task_id is None:
+            raise ValueError("Task id is missing")
+        return int(task_id), str(name)
 
 
 class AsyncExecutionOrchestrator:
@@ -475,7 +383,24 @@ class AsyncExecutionOrchestrator:
             for task in tasks
         ]
         
-        return await asyncio.gather(*coroutines, return_exceptions=True)
+        results = await asyncio.gather(*coroutines, return_exceptions=True)
+        processed: List[TaskExecutionResult] = []
+        for i, result in enumerate(results):
+            if isinstance(result, TaskExecutionResult):
+                processed.append(result)
+                continue
+            task_id, _ = self.executor._extract_task_info(tasks[i])
+            logger.error("Task %s failed with exception: %s", task_id, result)
+            processed.append(
+                TaskExecutionResult(
+                    task_id=task_id,
+                    status="failed",
+                    content=None,
+                    iterations=1,
+                    execution_time=0,
+                )
+            )
+        return processed
 
 
 # Convenience functions for integration

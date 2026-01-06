@@ -172,10 +172,12 @@ class LLMClient(LLMProvider):
 
         self.provider = provider_name
         self.api_key = api_key or env_api_key or settings_api_key
-        self.url = url or env_url or settings_url or config.get("default_url")
+        self.url = str(url or env_url or settings_url or config.get("default_url") or "")
         self.model = model or env_model or settings_model or config.get("default_model")
         self.extra_headers: Dict[str, str] = config.get("headers", {})
         self.payload_defaults: Dict[str, Any] = config.get("payload_defaults", {})
+        if not self.url:
+            raise RuntimeError(f"{self.provider.upper()} base URL is not configured.")
         self.endpoint_url = _compose_endpoint(self.url, config.get("endpoint_path"))
 
         if not self.api_key:
@@ -232,7 +234,6 @@ class LLMClient(LLMProvider):
         data = json.dumps(payload).encode("utf-8")
         req = request.Request(self.endpoint_url, data=data, headers=headers, method="POST")
 
-        last_err: Optional[Exception] = None
         for attempt in range(self.retries + 1):
             try:
                 with request.urlopen(req, timeout=self.timeout) as resp:
@@ -249,7 +250,6 @@ class LLMClient(LLMProvider):
                     # backoff retry
                     delay = max(0.0, self.backoff_base * (2**attempt) + random.uniform(0, self.backoff_base / 4.0))
                     time.sleep(delay)
-                    last_err = e
                     continue
                 try:
                     msg = e.read().decode("utf-8")
@@ -261,9 +261,9 @@ class LLMClient(LLMProvider):
                 if attempt < self.retries:
                     delay = max(0.0, self.backoff_base * (2**attempt) + random.uniform(0, self.backoff_base / 4.0))
                     time.sleep(delay)
-                    last_err = e
                     continue
                 raise RuntimeError(f"LLM request failed: {e}")
+        raise RuntimeError("LLM request failed after retries")
 
     def ping(self) -> bool:
         if self.mock:

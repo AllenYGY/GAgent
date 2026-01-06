@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from app.main import app
 from app.repository.plan_repository import PlanRepository
@@ -34,7 +34,9 @@ def test_get_plan_subgraph_endpoint(plan_repo: PlanRepository, test_client: Test
     root = plan_repo.create_task(plan.id, name="Root")
     child = plan_repo.create_task(plan.id, name="Child", parent_id=root.id)
 
-    response = test_client.get(f"/plans/{plan.id}/subgraph", params={"node_id": root.id, "max_depth": 2})
+    response = test_client.get(
+        f"/plans/{plan.id}/subgraph", params={"node_id": root.id, "max_depth": 2}
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["plan_id"] == plan.id
@@ -52,7 +54,9 @@ def test_decompose_task_endpoint_returns_stubbed_result(
     root = plan_repo.create_task(plan.id, name="Root")
 
     class StubDecomposer:
-        def decompose_node(self, plan_id: int, task_id: int, **kwargs) -> DecompositionResult:
+        def decompose_node(
+            self, plan_id: int, task_id: int, **kwargs
+        ) -> DecompositionResult:
             return DecompositionResult(
                 plan_id=plan_id,
                 mode="single_node",
@@ -99,21 +103,19 @@ def test_plan_results_endpoint(plan_repo: PlanRepository, test_client: TestClien
     plan = plan_repo.create_plan("Results Plan")
     root = plan_repo.create_task(plan.id, name="Root")
     child1 = plan_repo.create_task(plan.id, name="Child 1", parent_id=root.id)
-    child2 = plan_repo.create_task(plan.id, name="Child 2", parent_id=root.id)
+    plan_repo.create_task(plan.id, name="Child 2", parent_id=root.id)
     child3 = plan_repo.create_task(plan.id, name="Child 3", parent_id=root.id)
 
     plan_repo.update_task(
         plan.id,
         child1.id,
         status="completed",
-        execution_result=json.dumps(
-            {
-                "status": "success",
-                "content": "Trained models",
-                "notes": ["took 3 mins"],
-                "metadata": {"duration_sec": 180},
-            }
-        ),
+        execution_result=json.dumps({
+            "status": "success",
+            "content": "Trained models",
+            "notes": ["took 3 mins"],
+            "metadata": {"duration_sec": 180},
+        }),
     )
     plan_repo.update_task(
         plan.id,
@@ -136,7 +138,9 @@ def test_plan_results_endpoint(plan_repo: PlanRepository, test_client: TestClien
     assert items[child3.id]["notes"] == []
     assert items[child3.id]["metadata"] == {}
 
-    response_all = test_client.get(f"/plans/{plan.id}/results", params={"only_with_output": False})
+    response_all = test_client.get(
+        f"/plans/{plan.id}/results", params={"only_with_output": False}
+    )
     assert response_all.status_code == 200
     payload_all = response_all.json()
     assert payload_all["total"] == 4  # root + three children
@@ -161,7 +165,9 @@ def test_task_result_endpoint(plan_repo: PlanRepository, test_client: TestClient
     assert payload["raw"]["content"] == "Root output"
 
 
-def test_plan_execution_summary_endpoint(plan_repo: PlanRepository, test_client: TestClient):
+def test_plan_execution_summary_endpoint(
+    plan_repo: PlanRepository, test_client: TestClient
+):
     plan = plan_repo.create_plan("Summary Plan")
     root = plan_repo.create_task(plan.id, name="Root")
     child_a = plan_repo.create_task(plan.id, name="A", parent_id=root.id)

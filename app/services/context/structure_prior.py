@@ -9,9 +9,8 @@ weight adjustments for retrieval results, allowing tasks with higher relevance t
 
 import logging
 from collections import defaultdict, deque
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
-import numpy as np
 
 from ...repository.tasks import SqliteTaskRepository
 
@@ -167,7 +166,6 @@ class StructurePriorCalculator:
         weight = 0.0
 
         dependencies = graph["dependencies"]
-        reverse_deps = graph["reverse_deps"]
 
         # Check query -> candidate dependency
         if query_id in dependencies:

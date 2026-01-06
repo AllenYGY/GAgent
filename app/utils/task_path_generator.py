@@ -7,10 +7,9 @@
 - ATOMIC任务 → results/[root_name]/[composite_name]/[atomic_name].md
 """
 
-import os
 import re
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 def slugify(text: str) -> str:
@@ -49,15 +48,13 @@ def get_task_file_path(task: dict, repo=None) -> str:
     """
     # 解析任务信息
     if isinstance(task, dict):
-        task_id = task.get('id')
-        task_name = task.get('name', 'unnamed')
+        task_name = str(task.get('name') or 'unnamed')
         task_type = task.get('task_type', 'atomic')
         parent_id = task.get('parent_id')
         root_id = task.get('root_id')
     else:
         # tuple format: (id, name, status, ...)
-        task_id = task[0] if len(task) > 0 else None
-        task_name = task[1] if len(task) > 1 else 'unnamed'
+        task_name = str(task[1]) if len(task) > 1 and task[1] is not None else 'unnamed'
         task_type = task[7] if len(task) > 7 else 'atomic'
         parent_id = task[5] if len(task) > 5 else None
         root_id = task[10] if len(task) > 10 else None
@@ -77,9 +74,13 @@ def get_task_file_path(task: dict, repo=None) -> str:
         try:
             parent_task = repo.get_task_info(parent_id)
             if parent_task:
-                parent_name = parent_task.get('name') if isinstance(parent_task, dict) else parent_task[1]
+                parent_name = (
+                    parent_task.get('name')
+                    if isinstance(parent_task, dict)
+                    else parent_task[1]
+                )
                 parent_type = parent_task.get('task_type') if isinstance(parent_task, dict) else parent_task[7]
-                parent_clean = slugify(parent_name)
+                parent_clean = slugify(str(parent_name or 'unnamed'))
                 
                 # 如果父任务是ROOT，它是第一层
                 if parent_type == 'root':
@@ -92,7 +93,7 @@ def get_task_file_path(task: dict, repo=None) -> str:
                         root_task = repo.get_task_info(root_id)
                         if root_task:
                             root_name = root_task.get('name') if isinstance(root_task, dict) else root_task[1]
-                            root_clean = slugify(root_name)
+                            root_clean = slugify(str(root_name or 'unnamed'))
                             path_parts.insert(0, root_clean)
         except Exception as e:
             print(f"Warning: Failed to resolve parent task: {e}")
@@ -103,7 +104,7 @@ def get_task_file_path(task: dict, repo=None) -> str:
             root_task = repo.get_task_info(root_id)
             if root_task:
                 root_name = root_task.get('name') if isinstance(root_task, dict) else root_task[1]
-                root_clean = slugify(root_name)
+                root_clean = slugify(str(root_name or 'unnamed'))
                 if root_clean not in path_parts:
                     path_parts.insert(0, root_clean)
         except Exception:

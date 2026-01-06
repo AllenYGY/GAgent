@@ -8,8 +8,6 @@ from app.services.memory import chat_memory_middleware as mw_module
 from app.services.memory import memory_hooks as hooks_module
 from app.services.memory import memory_service as ms
 from app.services.memory.chat_memory_middleware import get_chat_memory_middleware
-from app.services.memory.memory_service import get_memory_service
-
 
 _FAKE_CONN = None
 
@@ -91,8 +89,12 @@ def test_memory_write_and_query(monkeypatch):
     monkeypatch.setattr(ms, "get_default_client", lambda: _DummyLLM())
     monkeypatch.setattr(ms, "get_embeddings_service", lambda: _DummyEmb())
     monkeypatch.setattr(ms.IntegratedMemoryService, "_analyze_content", _dummy_analyze)
-    monkeypatch.setattr(ms.IntegratedMemoryService, "_get_conn", lambda self, session_id: _fake_db())
-    monkeypatch.setattr(ms.IntegratedMemoryService, "_get_conn", lambda self, session_id: _fake_db())
+    monkeypatch.setattr(
+        ms.IntegratedMemoryService, "_get_conn", lambda self, session_id: _fake_db()
+    )
+    monkeypatch.setattr(
+        ms.IntegratedMemoryService, "_get_conn", lambda self, session_id: _fake_db()
+    )
 
     mw = mw_module.get_chat_memory_middleware()
 
@@ -145,7 +147,10 @@ def test_chat_prompt_includes_memories(monkeypatch):
             force_save=True,
         )
         # 构造 prompt，检查是否注入记忆片段
-        prompt = agent._build_prompt("What cache should we use?", memory_snippets="- [knowledge/medium] use redis cache")
+        prompt = agent._build_prompt(
+            "What cache should we use?",
+            memory_snippets="- [knowledge/medium] use redis cache",
+        )
         assert "Retrieved Memories" in prompt
         assert "redis cache" in prompt
 

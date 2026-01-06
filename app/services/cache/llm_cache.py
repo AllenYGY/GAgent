@@ -8,7 +8,7 @@ and response-specific features.
 import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, cast
 
 from .base_cache import BaseCache, CacheEntry
 
@@ -30,7 +30,8 @@ class LLMCacheEntry(CacheEntry):
         response_time: float = 0.0,
         cost: float = 0.0
     ):
-        super().__init__(key, value, ttl)
+        ttl_value = ttl if ttl is not None else 3600
+        super().__init__(key, value, ttl_value)
         self.model = model
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
@@ -346,4 +347,4 @@ class LLMCache(BaseCache):
 def get_llm_cache() -> LLMCache:
     """Get the default LLM cache instance."""
     from .cache_factory import CacheFactory
-    return CacheFactory.get_cache("llm", "default")
+    return cast(LLMCache, CacheFactory.get_cache("llm", "default"))

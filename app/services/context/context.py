@@ -37,11 +37,11 @@ def _get_task_by_id(task_id: int, repo: TaskRepository) -> Optional[Dict[str, An
     try:
         rows = repo.list_all_tasks()
         for r in rows:
-            try:
+            if isinstance(r, dict):
                 if r.get("id") == task_id:
                     return r
-            except Exception:
-                # Support tuple rows
+                continue
+            if isinstance(r, (list, tuple)) and len(r) >= 4:
                 try:
                     if int(r[0]) == int(task_id):
                         return {
@@ -137,7 +137,10 @@ def _get_ancestor_chain(task_id: int, repo: TaskRepository) -> List[Dict[str, An
                 stack.append(cur)
                 if cur.get("task_type") == "root":
                     break
-                cur = repo.get_parent(cur.get("id")) if hasattr(repo, "get_parent") else None
+                parent_id = cur.get("id")
+                if parent_id is None:
+                    break
+                cur = repo.get_parent(parent_id) if hasattr(repo, "get_parent") else None
                 guard += 1
             chain = list(reversed(stack))
     except Exception:
@@ -165,6 +168,8 @@ def _synthesize_root_brief(task_id: int, repo: TaskRepository) -> Optional[Dict[
         return None
 
     rid = root.get("id")
+    if rid is None:
+        return None
     rname = root.get("name", "")
     try:
         rprompt = repo.get_task_input_prompt(rid) or ""
@@ -242,7 +247,7 @@ def _priority_key_local(s: Dict[str, Any]) -> Tuple[int, int]:
 
 def gather_context(
     task_id: int,
-    repo: TaskRepository = default_repo,
+    repo: Any = default_repo,
     include_deps: bool = True,
     include_plan: bool = True,
     k: int = 5,

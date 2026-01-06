@@ -47,7 +47,7 @@ def get_graph_rag_settings() -> GraphRAGSettings:
     )
     default_path = os.path.abspath(default_path)
 
-    triples_path = _env("GRAPH_RAG_TRIPLES_PATH", default_path)
+    triples_path = _env("GRAPH_RAG_TRIPLES_PATH", default_path) or default_path
 
     try:
         cache_ttl = int(_env("GRAPH_RAG_CACHE_TTL", "900") or "900")

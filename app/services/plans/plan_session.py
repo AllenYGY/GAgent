@@ -14,6 +14,11 @@ class PlanSession:
         self.plan_id: Optional[int] = plan_id
         self._plan_tree: Optional[PlanTree] = None
         self._loaded: bool = False
+        # Simulation mode toggles (default permissive)
+        self.allow_web_search: bool = True
+        self.allow_rerun_task: bool = True
+        self.allow_graph_rag: bool = True
+        self.allow_show_tasks: bool = False
 
     @property
     def repo(self) -> PlanRepository:
@@ -22,7 +27,10 @@ class PlanSession:
     def bind(self, plan_id: int) -> PlanTree:
         """Bind to a plan and preload its tree."""
         self.plan_id = plan_id
-        return self.refresh()
+        tree = self.refresh()
+        if tree is None:
+            raise RuntimeError(f"Failed to load plan #{plan_id}.")
+        return tree
 
     def refresh(self) -> Optional[PlanTree]:
         """Reload the plan tree from storage."""

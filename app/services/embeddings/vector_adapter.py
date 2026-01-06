@@ -3,11 +3,8 @@
 将现有的嵌入服务无缝迁移到新的Milvus混合存储系统
 """
 
-import json
 import hashlib
-import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 import logging
 
 from ..storage.hybrid_vector_storage import get_hybrid_storage
@@ -29,11 +26,11 @@ class VectorStorageAdapter:
                 - "milvus": 仅使用新的Milvus系统
         """
         self.migration_mode = migration_mode
-        self.hybrid_storage = None
-        self.legacy_cache = None
+        self.hybrid_storage: Optional[Any] = None
+        self.legacy_cache: Optional[EmbeddingCache] = None
         
         # 统计信息
-        self.stats = {
+        self.stats: Dict[str, Any] = {
             "total_requests": 0,
             "cache_hits": 0,
             "cache_misses": 0,
@@ -206,10 +203,12 @@ class VectorStorageAdapter:
     async def _get_from_legacy(self, text: str, model: str) -> Optional[List[float]]:
         """从原有系统获取向量"""
         try:
+            if not self.legacy_cache:
+                return None
             # 使用原有缓存系统的接口
             result = self.legacy_cache.get(text, model)
-            if result and hasattr(result, 'embedding'):
-                return result.embedding
+            if isinstance(result, list):
+                return result
             return None
         except Exception as e:
             logger.error(f"SQLite查询失败: {e}")
@@ -218,6 +217,8 @@ class VectorStorageAdapter:
     async def _store_to_legacy(self, text: str, embedding: List[float], model: str) -> bool:
         """存储到原有系统"""
         try:
+            if not self.legacy_cache:
+                return False
             # 使用原有缓存系统的接口
             self.legacy_cache.put(text, embedding, model)
             return True

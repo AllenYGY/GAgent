@@ -10,11 +10,11 @@ from typing import Any, Dict
 from fastapi import APIRouter, Body, HTTPException
 
 from ..models_memory import (
+    ImportanceLevel,
+    MemoryType,
     MemoryStats,
     QueryMemoryRequest,
-    QueryMemoryResponse,
     SaveMemoryRequest,
-    SaveMemoryResponse,
 )
 from ..services.memory.memory_service import get_memory_service
 from ..services.memory.memory_hooks import get_memory_hooks
@@ -185,7 +185,6 @@ async def auto_save_task_memory(task_data: Dict[str, Any] = Body(...)):
     """
     try:
         task_id = task_data.get("task_id")
-        task_name = task_data.get("task_name", "")
         task_content = task_data.get("content", "")
 
         if not task_id or not task_content:
@@ -194,8 +193,8 @@ async def auto_save_task_memory(task_data: Dict[str, Any] = Body(...)):
         # 创建保存请求
         save_request = SaveMemoryRequest(
             content=task_content,
-            memory_type="experience",  # 任务输出作为经验记忆
-            importance="medium",
+            memory_type=MemoryType.EXPERIENCE,  # 任务输出作为经验记忆
+            importance=ImportanceLevel.MEDIUM,
             tags=["task_output", "auto_generated"],
             related_task_id=task_id,
         )

@@ -225,8 +225,6 @@ class SemanticRetrievalService:
 
     def get_retrieval_stats(self) -> Dict[str, Any]:
         """Get retrieval system statistics information"""
-        embedding_stats = self.repo.get_embedding_stats()
-
         return {
             "service": "Semantic Retrieval",
             "embeddings_service": self.embeddings_service.get_service_info(),

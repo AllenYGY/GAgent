@@ -53,6 +53,8 @@ class ChatMemoryMiddleware:
 
         if not should_save:
             return None
+        if memory_type is None:
+            memory_type = MemoryType.CONVERSATION
 
         # 保存为记忆（使用LLM判断的类型）
         try:

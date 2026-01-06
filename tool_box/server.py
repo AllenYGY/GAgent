@@ -9,9 +9,9 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from .tools import ToolDefinition, get_tool_registry
+from .tools import get_tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,8 @@ class ToolBoxMCPServer:
     async def _handle_call_tool(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle tools/call request"""
         tool_name = params.get("name")
+        if not isinstance(tool_name, str) or not tool_name:
+            return {"jsonrpc": "2.0", "error": {"code": -32602, "message": "Tool name is required"}}
         tool_args = params.get("arguments", {})
 
         tool_def = self.tool_registry.get_tool(tool_name)

@@ -1,6 +1,5 @@
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 import pytest
 
@@ -10,12 +9,16 @@ from app.services.plans.plan_models import PlanNode
 
 
 def test_create_and_delete_plan(plan_repo: PlanRepository, main_db_path: Path):
-    plan = plan_repo.create_plan("Demo", description="desc", metadata={"owner": "tester"})
+    plan = plan_repo.create_plan(
+        "Demo", description="desc", metadata={"owner": "tester"}
+    )
     plan_id = plan.id
 
     with sqlite3.connect(main_db_path) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT title, metadata, plan_db_path FROM plans WHERE id=?", (plan_id,)).fetchone()
+        row = conn.execute(
+            "SELECT title, metadata, plan_db_path FROM plans WHERE id=?", (plan_id,)
+        ).fetchone()
     assert row is not None
     assert row["title"] == "Demo"
 
@@ -34,7 +37,10 @@ def test_plan_initialization_tables(plan_repo: PlanRepository):
     plan = plan_repo.create_plan("Init")
     plan_path = get_plan_db_path(plan.id)
     with sqlite3.connect(plan_path) as conn:
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     assert {"plan_meta", "tasks", "task_dependencies", "snapshots"}.issubset(tables)
 
 
@@ -80,7 +86,9 @@ def test_task_crud_and_context(plan_repo: PlanRepository):
     assert reloaded.execution_result == "success"
     assert reloaded.status == "running"
 
-    moved = plan_repo.move_task(plan_id, child.id, new_parent_id=dependency.id, new_position=0)
+    moved = plan_repo.move_task(
+        plan_id, child.id, new_parent_id=dependency.id, new_position=0
+    )
     assert moved.parent_id == dependency.id
 
     plan_repo.delete_task(plan_id, dependency.id)

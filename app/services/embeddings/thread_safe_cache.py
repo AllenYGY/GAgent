@@ -9,7 +9,6 @@
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -123,12 +122,16 @@ class ThreadSafeEmbeddingCache:
         content = f"{model}:{text}"
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    def get(self, text: str, model: str = None) -> Optional[List[float]]:
+    def _resolve_model(self, model: Optional[str]) -> str:
+        value = model or getattr(self.config, "embedding_model", None)
+        return value or "embedding-3"
+
+    def get(self, text: str, model: Optional[str] = None) -> Optional[List[float]]:
         """线程安全获取嵌入向量"""
         if not text.strip():
             return None
 
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         text_hash = self._compute_text_hash(text, model)
         current_time = time.time()
 
@@ -188,12 +191,12 @@ class ThreadSafeEmbeddingCache:
 
         return None
 
-    def put(self, text: str, embedding: List[float], model: str = None) -> None:
+    def put(self, text: str, embedding: List[float], model: Optional[str] = None) -> None:
         """线程安全存储嵌入向量"""
         if not text.strip() or not embedding:
             return
 
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         text_hash = self._compute_text_hash(text, model)
         current_time = time.time()
 
@@ -266,9 +269,9 @@ class ThreadSafeEmbeddingCache:
         except Exception as e:
             logger.warning(f"Failed to write to persistent cache: {e}")
 
-    def get_batch(self, texts: List[str], model: str = None) -> Tuple[List[Optional[List[float]]], List[int]]:
+    def get_batch(self, texts: List[str], model: Optional[str] = None) -> Tuple[List[Optional[List[float]]], List[int]]:
         """批量获取嵌入向量（线程安全）"""
-        model = model or self.config.embedding_model
+        model = self._resolve_model(model)
         results = []
         cache_misses = []
 
@@ -280,7 +283,7 @@ class ThreadSafeEmbeddingCache:
 
         return results, cache_misses
 
-    def put_batch(self, texts: List[str], embeddings: List[List[float]], model: str = None) -> None:
+    def put_batch(self, texts: List[str], embeddings: List[List[float]], model: Optional[str] = None) -> None:
         """批量存储嵌入向量（线程安全）"""
         if len(texts) != len(embeddings):
             raise ValueError("texts and embeddings must have the same length")

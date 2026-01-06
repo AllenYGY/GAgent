@@ -17,6 +17,7 @@ from app.services.plans.plan_executor import (
     ExecutionConfig,
     ExecutionResponse,
     PlanExecutor,
+    PlanExecutorLLMService,
 )
 from app.services.plans.plan_session import PlanSession
 
@@ -199,7 +200,7 @@ async def test_move_and_delete_task(monkeypatch, plan_repo):
 async def test_execute_plan_action(monkeypatch, plan_repo):
     plan = plan_repo.create_plan("Execution Demo")
     root = plan_repo.create_task(plan.id, name="Root")
-    child = plan_repo.create_task(plan.id, name="Child", parent_id=root.id)
+    _child = plan_repo.create_task(plan.id, name="Child", parent_id=root.id)
 
     actions = [
         LLMAction(
@@ -619,8 +620,8 @@ async def test_tool_operation_graph_rag(monkeypatch, plan_repo):
     assert captured_params["hops"] <= get_graph_rag_settings().max_hops
 
 
-class _StubExecutorLLM:
-    def __init__(self):
+class _StubExecutorLLM(PlanExecutorLLMService):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     def generate(self, prompt: str, config: ExecutionConfig) -> ExecutionResponse:
@@ -644,6 +645,7 @@ class _StubPlanDecomposer:
         *,
         max_depth: Optional[int] = None,
         node_budget: Optional[int] = None,
+        allow_web_search: Optional[bool] = None,
     ) -> DecompositionResult:
         self.last_plan_id = plan_id
         self.last_node_id = None
@@ -659,7 +661,11 @@ class _StubPlanDecomposer:
             created_tasks=created,
             failed_nodes=[],
             stopped_reason=None,
-            stats={"max_depth": max_depth, "node_budget": node_budget},
+            stats={
+                "max_depth": max_depth,
+                "node_budget": node_budget,
+                "allow_web_search": allow_web_search,
+            },
         )
 
     def decompose_node(
@@ -670,6 +676,7 @@ class _StubPlanDecomposer:
         expand_depth: Optional[int] = None,
         node_budget: Optional[int] = None,
         allow_existing_children: Optional[bool] = None,
+        allow_web_search: Optional[bool] = None,
     ) -> DecompositionResult:
         self.last_plan_id = plan_id
         self.last_node_id = node_id
@@ -693,5 +700,6 @@ class _StubPlanDecomposer:
                 "expand_depth": expand_depth,
                 "node_budget": node_budget,
                 "allow_existing_children": allow_existing_children,
+                "allow_web_search": allow_web_search,
             },
         )

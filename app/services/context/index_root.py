@@ -5,9 +5,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ..interfaces import TaskRepository
-from ..repository.tasks import default_repo
-from ..utils import split_prefix
+from ...repository.tasks import default_repo
+from ...utils import split_prefix
 from app.services.context.context_budget import PRIORITY_ORDER
 from app.services.foundation.settings import get_settings
 
@@ -52,7 +51,7 @@ def _stage_for_counts(done: int, total: int) -> str:
     return "Planning"
 
 
-def _plan_tasks(repo: TaskRepository, title: str) -> List[Dict[str, Any]]:
+def _plan_tasks(repo: Any, title: str) -> List[Dict[str, Any]]:
     rows = repo.list_plan_tasks(title) or []
     out: List[Dict[str, Any]] = []
     for r in rows:
@@ -75,7 +74,7 @@ def _plan_tasks(repo: TaskRepository, title: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _plan_last_updated(repo: TaskRepository, task_ids: List[int]) -> str:
+def _plan_last_updated(repo: Any, task_ids: List[int]) -> str:
     latest: Optional[str] = None
     for tid in task_ids:
         try:
@@ -93,17 +92,23 @@ def _plan_last_updated(repo: TaskRepository, task_ids: List[int]) -> str:
     return _format_ts(latest)
 
 
-def _requires_links_for_plan(repo: TaskRepository, plan_task_ids: Set[int]) -> List[Tuple[int, int]]:
+def _to_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _requires_links_for_plan(repo: Any, plan_task_ids: Set[int]) -> List[Tuple[int, int]]:
     try:
         links = repo.list_links(kind="requires")
     except Exception:
         links = []
     edges: List[Tuple[int, int]] = []
-    for l in links:
-        try:
-            u = int(l.get("from_id"))
-            v = int(l.get("to_id"))
-        except Exception:
+    for link in links:
+        u = _to_int(link.get("from_id"))
+        v = _to_int(link.get("to_id"))
+        if u is None or v is None:
             continue
         if u in plan_task_ids and v in plan_task_ids:
             edges.append((u, v))
@@ -158,7 +163,7 @@ def _bottlenecks(adj: Dict[int, List[int]], nodes: Set[int], topk: int = 3) -> L
 
 
 def generate_index(
-    repo: TaskRepository = default_repo,
+    repo: Any = default_repo,
     brief_tasks_n: int = 3,
     history_n: int = 10,
     path: Optional[str] = None,

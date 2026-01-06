@@ -5,7 +5,6 @@ Provides a unified caching foundation with thread-safe operations,
 TTL management, and persistent storage support.
 """
 
-import hashlib
 import json
 import logging
 import sqlite3
@@ -13,8 +12,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
-from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +58,17 @@ class CacheEntry:
             'last_accessed': self.last_accessed,
             'access_count': self.access_count,
         })
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a dict representation for subclasses to extend."""
+        return {
+            'key': self.key,
+            'value': self.value,
+            'ttl': self.ttl,
+            'created_at': self.created_at,
+            'last_accessed': self.last_accessed,
+            'access_count': self.access_count,
+        }
 
     @classmethod
     def deserialize(cls, data: str) -> 'CacheEntry':
@@ -427,7 +436,7 @@ class BaseCache(ABC):
     def get_or_compute(
         self,
         key: str,
-        compute_func: callable,
+        compute_func: Callable[..., Any],
         ttl: Optional[int] = None,
         *args,
         **kwargs

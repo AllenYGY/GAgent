@@ -30,14 +30,23 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 try:  # Optional; skip if not available
-    from dotenv import find_dotenv, load_dotenv
+    from dotenv import find_dotenv as _find_dotenv  # type: ignore
+    from dotenv import load_dotenv as _load_dotenv  # type: ignore
 except Exception:  # pragma: no cover
+    _find_dotenv = None
+    _load_dotenv = None
 
-    def find_dotenv(*_, **__):
+
+def find_dotenv(*args, **kwargs) -> Optional[str]:
+    if _find_dotenv is None:
         return None
+    return _find_dotenv(*args, **kwargs)
 
-    def load_dotenv(*_, **__):
+
+def load_dotenv(*args, **kwargs) -> bool:
+    if _load_dotenv is None:
         return False
+    return bool(_load_dotenv(*args, **kwargs))
 
 
 # Ensure repository root on sys.path
@@ -402,13 +411,14 @@ def normalize_plan(raw_plan: Dict[str, Any], fallback_plan_id: int) -> PlanTree:
     for pid, children in adjacency.items():
         adjacency_map[pid] = children
 
+    raw_metadata = raw_plan.get("metadata")
+    metadata: Dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+
     return PlanTree(
         id=plan_id,
         title=title,
         description=description,
-        metadata=raw_plan.get("metadata")
-        if isinstance(raw_plan.get("metadata"), dict)
-        else {},
+        metadata=metadata,
         nodes=plan_nodes,
         adjacency=adjacency_map,
     )

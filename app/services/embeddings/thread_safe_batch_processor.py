@@ -11,8 +11,8 @@
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -319,8 +319,8 @@ class ThreadSafeBatchProcessor:
     def precompute_for_completed_tasks(self, batch_size: int = 10) -> int:
         """为已完成任务预计算嵌入向量"""
         try:
-            from ..database import init_db
-            from ..repository.tasks import SqliteTaskRepository
+            from ...database import init_db
+            from ...repository.tasks import SqliteTaskRepository
 
             init_db()
             repo = SqliteTaskRepository()

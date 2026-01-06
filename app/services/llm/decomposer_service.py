@@ -126,15 +126,35 @@ class DecompositionResponse(BaseModel):
         return [DecompositionChild.from_payload(item) for item in self.children_raw]
 
     @classmethod
-    def model_validate_json(cls, json_data: str) -> "DecompositionResponse":
+    def model_validate_json(
+        cls,
+        json_data: str | bytes | bytearray,
+        *,
+        strict: bool | None = None,
+        extra: Any | None = None,
+        context: Any | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
+    ) -> "DecompositionResponse":
         try:
-            parsed = json.loads(json_data)
+            if isinstance(json_data, (bytes, bytearray)):
+                text = json_data.decode("utf-8", errors="ignore")
+            else:
+                text = str(json_data)
+            parsed = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid decomposition JSON: {exc}") from exc
         if isinstance(parsed, dict) and "children" in parsed and "children_raw" not in parsed:
             parsed = dict(parsed)
             parsed["children_raw"] = parsed.pop("children") or []
-        return super().model_validate(parsed)
+        return super().model_validate(
+            parsed,
+            strict=strict,
+            context=context,
+            by_alias=by_alias,
+            by_name=by_name,
+            extra=extra,
+        )
 
 
 def strip_code_fences(text: str) -> str:
@@ -186,3 +206,7 @@ class PlanDecomposerLLMService:
         except ValidationError:
             logger.error("Failed to parse decomposition response: %s", cleaned)
             raise
+
+    def decide_search(self, prompt: str) -> str:
+        """Return raw LLM output for search decision prompts."""
+        return self._llm.chat(prompt, model=self._settings.model)

@@ -5,8 +5,7 @@ Provides batch query methods and efficient data fetching strategies.
 """
 
 import logging
-import sqlite3
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from app.database_pool import get_db
 
@@ -177,42 +176,41 @@ class OptimizedTaskQueries:
         if not task_ids:
             return {}
 
-        with get_db() as conn:
-            # First, get all tasks
-            tasks = OptimizedTaskQueries.batch_get_tasks(task_ids)
+        # First, get all tasks
+        tasks = OptimizedTaskQueries.batch_get_tasks(task_ids)
 
-            # Collect all dependency IDs
-            all_dep_ids = set()
-            for task in tasks.values():
+        # Collect all dependency IDs
+        all_dep_ids = set()
+        for task in tasks.values():
+            if task.get("dependencies"):
+                try:
+                    import json
+
+                    deps = json.loads(task["dependencies"])
+                    if isinstance(deps, list):
+                        all_dep_ids.update(deps)
+                except Exception:
+                    pass
+
+        # Batch fetch all dependencies
+        if all_dep_ids:
+            dep_tasks = OptimizedTaskQueries.batch_get_tasks(list(all_dep_ids))
+
+            # Attach dependency details to tasks
+            for task_id, task in tasks.items():
                 if task.get("dependencies"):
                     try:
                         import json
 
                         deps = json.loads(task["dependencies"])
                         if isinstance(deps, list):
-                            all_dep_ids.update(deps)
-                    except:
-                        pass
+                            task["dependency_details"] = [
+                                dep_tasks.get(dep_id) for dep_id in deps if dep_id in dep_tasks
+                            ]
+                    except Exception:
+                        task["dependency_details"] = []
 
-            # Batch fetch all dependencies
-            if all_dep_ids:
-                dep_tasks = OptimizedTaskQueries.batch_get_tasks(list(all_dep_ids))
-
-                # Attach dependency details to tasks
-                for task_id, task in tasks.items():
-                    if task.get("dependencies"):
-                        try:
-                            import json
-
-                            deps = json.loads(task["dependencies"])
-                            if isinstance(deps, list):
-                                task["dependency_details"] = [
-                                    dep_tasks.get(dep_id) for dep_id in deps if dep_id in dep_tasks
-                                ]
-                        except:
-                            task["dependency_details"] = []
-
-            return tasks
+        return tasks
 
     @staticmethod
     def get_subtree_with_children(root_id: int) -> Dict[str, Any]:

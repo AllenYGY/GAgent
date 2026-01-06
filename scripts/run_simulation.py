@@ -92,7 +92,7 @@ async def _run(args: argparse.Namespace) -> None:
     )
     goal = (args.goal or "").strip() or default_goal
 
-    registry = SimulationRegistry(SimulationOrchestrator)
+    registry: SimulationRegistry = SimulationRegistry()
     session_id = args.session_id or f"sim-{uuid4().hex}"
     max_turns = max(args.max_turns, 1)
     config = SimulationRunConfig(

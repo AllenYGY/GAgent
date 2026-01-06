@@ -8,7 +8,6 @@
 
 import logging
 import threading
-import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional
 
@@ -74,7 +73,7 @@ class AsyncEmbeddingManager:
             if callback:
                 self._task_callbacks[id(future)] = callback
 
-        logger.debug(f"Submitted async single embedding task")
+        logger.debug("Submitted async single embedding task")
         return future
 
     def precompute_embeddings_async(self, texts: List[str], progress_callback: Optional[Callable] = None) -> Future:

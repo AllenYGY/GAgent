@@ -5,11 +5,22 @@
 """
 
 # 从原utils.py导入核心函数
-import re
-import json
 import asyncio
+import json
+import re
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict
+
+from .route_helpers import (
+    parse_bool,
+    parse_int,
+    parse_opt_float,
+    parse_opt_int,
+    parse_schedule,
+    parse_strategy,
+    sanitize_context_options,
+    sanitize_manual_list,
+)
 
 
 def plan_prefix(title: str) -> str:
@@ -78,18 +89,6 @@ def run_async(coro):
         # No current event loop
         return asyncio.run(coro)
 
-
-# 从route_helpers导入新的解析函数
-from .route_helpers import (
-    parse_bool,
-    parse_int, 
-    parse_opt_float,
-    parse_opt_int,
-    parse_strategy,
-    parse_schedule,
-    sanitize_manual_list,
-    sanitize_context_options,
-)
 
 __all__ = [
     "plan_prefix",

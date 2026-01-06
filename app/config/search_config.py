@@ -64,12 +64,12 @@ def get_search_settings() -> SearchSettings:
     perplexity_model = _env("PERPLEXITY_MODEL", "sonar-pro")
 
     try:
-        builtin_timeout = float(_env("WEB_SEARCH_BUILTIN_TIMEOUT", "40.0"))
+        builtin_timeout = float(_env("WEB_SEARCH_BUILTIN_TIMEOUT", "40.0") or "40.0")
     except Exception:
         builtin_timeout = 40.0
 
     try:
-        perplexity_timeout = float(_env("WEB_SEARCH_PERPLEXITY_TIMEOUT", "30.0"))
+        perplexity_timeout = float(_env("WEB_SEARCH_PERPLEXITY_TIMEOUT", "30.0") or "30.0")
     except Exception:
         perplexity_timeout = 30.0
 

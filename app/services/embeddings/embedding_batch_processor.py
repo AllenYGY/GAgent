@@ -11,7 +11,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class EmbeddingBatchProcessor:
         batches = self._split_into_batches(texts)
         logger.debug(f"Split {len(texts)} texts into {len(batches)} batches")
 
-        results = [None] * len(batches)
+        results: List[Optional[List[List[float]]]] = [None] * len(batches)
 
         with ThreadPoolExecutor(max_workers=self.max_concurrent_batches) as executor:
             future_to_index = {

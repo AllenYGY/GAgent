@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, List, Optional
+from typing import Iterable, List, Optional
 
 from fastapi import APIRouter
 

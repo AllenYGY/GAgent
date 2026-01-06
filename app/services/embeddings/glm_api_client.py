@@ -10,7 +10,7 @@ Separated from GLMEmbeddingsService following Single Responsibility Principle.
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import requests
 
@@ -68,6 +68,7 @@ class GLMApiClient:
                 else:
                     logger.error(f"API request failed after {self.max_retries} attempts")
                     raise e
+        raise RuntimeError("API request failed without retry attempts")
 
     def _make_api_request(self, texts: List[str]) -> List[List[float]]:
         """Execute actual API request"""

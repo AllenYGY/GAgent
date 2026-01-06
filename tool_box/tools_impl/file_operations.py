@@ -4,12 +4,11 @@ File Operations Tool Implementation
 This module provides file system operations for AI agents.
 """
 
-import asyncio
 import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +117,12 @@ async def file_operations_handler(
         elif operation == "delete":
             return await _delete_path(path)
         elif operation == "copy":
+            if not destination:
+                return {"operation": operation, "path": path, "success": False, "error": "Destination is required"}
             return await _copy_path(path, destination)
         elif operation == "move":
+            if not destination:
+                return {"operation": operation, "path": path, "success": False, "error": "Destination is required"}
             return await _move_path(path, destination)
         elif operation == "exists":
             return await _check_exists(path)

@@ -5,7 +5,10 @@ from typing import Iterable, List, Optional
 
 from app.config.decomposer_config import DecomposerSettings
 from app.repository.plan_repository import PlanRepository
-from app.services.llm.decomposer_service import DecompositionResponse
+from app.services.llm.decomposer_service import (
+    DecompositionResponse,
+    PlanDecomposerLLMService,
+)
 from app.services.plans.plan_decomposer import PlanDecomposer
 
 
@@ -26,7 +29,7 @@ def _make_response(
     )
 
 
-class StubDecomposerLLM:
+class StubDecomposerLLM(PlanDecomposerLLMService):
     def __init__(self, responses: Iterable[DecompositionResponse]) -> None:
         self._responses = iter(responses)
         self.prompts: List[str] = []

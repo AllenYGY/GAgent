@@ -169,7 +169,7 @@ class SQLiteConnectionPool:
                 # Rollback any pending transaction
                 try:
                     conn.rollback()
-                except:
+                except Exception:
                     pass
             raise
         finally:

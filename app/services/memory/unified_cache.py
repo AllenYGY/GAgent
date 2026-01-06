@@ -15,7 +15,7 @@ from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class CacheEntry:
                 return len(json.dumps(obj).encode("utf-8"))
             else:
                 return len(str(obj).encode("utf-8"))
-        except:
+        except Exception:
             return 100  # Default size
 
     def is_expired(self) -> bool:
@@ -63,7 +63,7 @@ class CacheEntry:
 
     def get_heat_score(self) -> float:
         """Calculate heat score for cache eviction."""
-        age = time.time() - self.created_at
+        # age = time.time() - self.created_at
         recency = time.time() - self.accessed_at
 
         # Higher score = hotter data
@@ -261,7 +261,13 @@ class UnifiedCache:
 
         return None
 
-    def set(self, key: str, value: Any, namespace: str = "default", ttl: Optional[int] = None):
+    def set(
+        self,
+        key: str,
+        value: Any,
+        namespace: str = "default",
+        ttl: Optional[int] = None,
+    ):
         """
         Set value in cache.
 
@@ -294,7 +300,9 @@ class UnifiedCache:
         """Add entry to L1 cache with eviction if needed."""
         if len(self.l1_cache) >= self.l1_size:
             # Evict coldest entry from L1 to L2
-            coldest_key = min(self.l1_cache.keys(), key=lambda k: self.l1_cache[k].get_heat_score())
+            coldest_key = min(
+                self.l1_cache.keys(), key=lambda k: self.l1_cache[k].get_heat_score()
+            )
             demoted_entry = self.l1_cache.pop(coldest_key)
             self._add_to_l2(coldest_key, demoted_entry)
             self.stats["l1_evictions"] += 1
@@ -340,7 +348,12 @@ class UnifiedCache:
             logger.error(f"Error saving to disk cache: {e}")
 
     def get_or_compute(
-        self, key: str, compute_func: Callable, namespace: str = "default", ttl: Optional[int] = None, **kwargs
+        self,
+        key: str,
+        compute_func: Callable,
+        namespace: str = "default",
+        ttl: Optional[int] = None,
+        **kwargs,
     ) -> Any:
         """
         Get from cache or compute if missing.
@@ -393,7 +406,9 @@ class UnifiedCache:
             if self.enable_disk:
                 try:
                     conn = sqlite3.connect(self.db_path)
-                    conn.execute("DELETE FROM cache_entries WHERE cache_key = ?", (cache_key,))
+                    conn.execute(
+                        "DELETE FROM cache_entries WHERE cache_key = ?", (cache_key,)
+                    )
                     conn.commit()
                     conn.close()
                 except Exception as e:
@@ -419,7 +434,9 @@ class UnifiedCache:
             if self.enable_disk:
                 try:
                     conn = sqlite3.connect(self.db_path)
-                    conn.execute("DELETE FROM cache_entries WHERE namespace = ?", (namespace,))
+                    conn.execute(
+                        "DELETE FROM cache_entries WHERE namespace = ?", (namespace,)
+                    )
                     conn.commit()
                     conn.close()
                 except Exception as e:
@@ -467,10 +484,16 @@ class UnifiedCache:
         """Get comprehensive cache statistics."""
         with self.lock:
             l1_heat = (
-                sum(e.get_heat_score() for e in self.l1_cache.values()) / len(self.l1_cache) if self.l1_cache else 0
+                sum(e.get_heat_score() for e in self.l1_cache.values())
+                / len(self.l1_cache)
+                if self.l1_cache
+                else 0
             )
             l2_heat = (
-                sum(e.get_heat_score() for e in self.l2_cache.values()) / len(self.l2_cache) if self.l2_cache else 0
+                sum(e.get_heat_score() for e in self.l2_cache.values())
+                / len(self.l2_cache)
+                if self.l2_cache
+                else 0
             )
 
             stats = {
@@ -486,17 +509,25 @@ class UnifiedCache:
                     "avg_heat_score": l2_heat,
                     "hits": self.stats["l2_hits"],
                 },
-                "l3_cache": {"enabled": self.enable_disk, "hits": self.stats["l3_hits"]},
+                "l3_cache": {
+                    "enabled": self.enable_disk,
+                    "hits": self.stats["l3_hits"],
+                },
                 "overall": {
-                    "total_hits": self.stats["l1_hits"] + self.stats["l2_hits"] + self.stats["l3_hits"],
+                    "total_hits": self.stats["l1_hits"]
+                    + self.stats["l2_hits"]
+                    + self.stats["l3_hits"],
                     "total_misses": self.stats["cache_misses"],
                     "hit_rate": self._calculate_hit_rate(),
                     "sets": self.stats["cache_sets"],
                     "invalidations": self.stats["invalidations"],
                     "promotions": self.stats["promotions"],
-                    "evictions": self.stats["l1_evictions"] + self.stats["l2_evictions"],
+                    "evictions": self.stats["l1_evictions"]
+                    + self.stats["l2_evictions"],
                 },
-                "namespaces": {ns: len(keys) for ns, keys in self.cache_namespaces.items()},
+                "namespaces": {
+                    ns: len(keys) for ns, keys in self.cache_namespaces.items()
+                },
             }
 
             # Add disk cache stats if enabled
@@ -515,14 +546,12 @@ class UnifiedCache:
                     )
                     row = cursor.fetchone()
                     if row:
-                        stats["l3_cache"].update(
-                            {
-                                "total_entries": row[0],
-                                "total_size_bytes": row[1] or 0,
-                                "avg_access_count": row[2] or 0,
-                                "avg_heat_score": row[3] or 0,
-                            }
-                        )
+                        stats["l3_cache"].update({
+                            "total_entries": row[0],
+                            "total_size_bytes": row[1] or 0,
+                            "avg_access_count": row[2] or 0,
+                            "avg_heat_score": row[3] or 0,
+                        })
                     conn.close()
                 except Exception as e:
                     logger.error(f"Error getting disk cache stats: {e}")
@@ -531,7 +560,9 @@ class UnifiedCache:
 
     def _calculate_hit_rate(self) -> float:
         """Calculate overall cache hit rate."""
-        total_hits = self.stats["l1_hits"] + self.stats["l2_hits"] + self.stats["l3_hits"]
+        total_hits = (
+            self.stats["l1_hits"] + self.stats["l2_hits"] + self.stats["l3_hits"]
+        )
         total_requests = total_hits + self.stats["cache_misses"]
         return total_hits / total_requests if total_requests > 0 else 0.0
 

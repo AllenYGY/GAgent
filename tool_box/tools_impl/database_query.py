@@ -9,7 +9,6 @@ import logging
 import sqlite3
 import threading
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
