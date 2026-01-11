@@ -18,3 +18,5 @@ experiments-*/*
 bulk_plans.csv
 scripts/*
 
+.pytest_cache/*
+.ruff_cache/*

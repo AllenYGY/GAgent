@@ -1,19 +1,65 @@
 #!/usr/bin/env python3
-"""Plot the distribution of misaligned turns across simulation runs."""
+"""
+Plot the distribution of misaligned turns across simulation runs.
+Optimized for publication-quality figures suitable for top-tier scientific journals.
+"""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
+
+# Ensure matplotlib is available for professional plotting
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+    from cycler import cycler
+except ModuleNotFoundError:
+    print(
+        "[ERROR] matplotlib is required for generating publication-quality plots.\n"
+        "Please install it via: pip install matplotlib"
+    )
+    sys.exit(1)
+
+
+def set_publication_style():
+    """
+    Sets global matplotlib rcParams for a professional, publication-ready aesthetic.
+    Focuses on serif fonts, clean layouts, and high readability.
+    """
+    plt.rcParams.update({
+        # Use serif fonts to match typical journal body text (e.g., Times New Roman)
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif", "serif"],
+        "font.size": 10,
+        # Increase readability for labels and titles
+        "axes.labelsize": 11,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 9,
+        # Heavier axes lines for definition
+        "axes.linewidth": 0.8,
+        # Cleaner legend
+        "legend.frameon": False,
+        "legend.fontsize": 9,
+        # Professional color palette (muted slate blue instead of harsh default blue)
+        "axes.prop_cycle": cycler(color=["#4E79A7", "#F28E2B", "#E15759", "#76B7B2"]),
+        # High DPI for raster output by default
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.05,
+    })
 
 
 def collect_misalignment_turns(
     run_dir: Path,
 ) -> Tuple[Counter[int], Counter[int], int, int, int, Dict[str, set]]:
+    """Collects misalignment data from individual JSON run logs."""
     overall: Counter[int] = Counter()
     first_hits: Counter[int] = Counter()
     max_turn_seen = 0
@@ -58,11 +104,7 @@ def collect_misalignment_turns(
 def collect_from_results_csv(
     csv_path: Path,
 ) -> Tuple[Counter[int], Counter[int], int, int, int, Dict[str, set]]:
-    """Collect misalignment counts from a results.csv produced by full_plan mode.
-
-    Expected columns: run, turn, alignment (aligned|misaligned|unclear).
-    Counts misaligned entries; unclear is ignored for the histogram.
-    """
+    """Collects misalignment counts from an aggregated results.csv file."""
     overall: Counter[int] = Counter()
     first_hits: Counter[int] = Counter()
     max_turn_seen = 0
@@ -95,104 +137,107 @@ def collect_from_results_csv(
     return overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns
 
 
-def _plot_svg(
-    counter: Counter[int],
-    *,
-    output_path: Path,
-    total_runs: int,
-    turns_range: Iterable[int],
-) -> None:
-    turns = list(turns_range)
-    labels = [str(t) for t in turns]
-    counts = [counter.get(t, 0) for t in turns]
-    max_count = max(counts) if counts else 0
-    width, height = 900, 500
-    margin = 60
-    chart_width = width - 2 * margin
-    chart_height = height - 2 * margin
-    bar_width = chart_width / max(len(turns), 1)
-    scale = chart_height / max_count if max_count else 1
-
-    lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
-        "<style>text { font-family: Arial, sans-serif; }</style>",
-        f'<text x="{width / 2}" y="30" text-anchor="middle" font-size="20">Misaligned turn distribution (runs={total_runs}, issues={sum(counts)})</text>',
-        f'<line x1="{margin}" y1="{height - margin}" x2="{width - margin}" y2="{height - margin}" stroke="#111"/>',
-        f'<line x1="{margin}" y1="{margin}" x2="{margin}" y2="{height - margin}" stroke="#111"/>',
-    ]
-    bars = []
-    for idx, label in enumerate(labels):
-        value = counts[idx]
-        x = margin + idx * bar_width
-        y = height - margin - value * scale
-        bars.append((x, y, label, value))
-    for x, y, label, value in bars:
-        lines.append(
-            f'<rect x="{x:.2f}" y="{y:.2f}" width="{bar_width * 0.8:.2f}" height="{value * scale:.2f}" fill="#3b82f6" opacity="0.9" />'
-        )
-        lines.append(
-            f'<text x="{x + (bar_width * 0.4):.2f}" y="{height - margin + 20}" text-anchor="middle" font-size="12">{label}</text>'
-        )
-        lines.append(
-            f'<text x="{x + (bar_width * 0.4):.2f}" y="{y - 6:.2f}" text-anchor="middle" font-size="12">{value}</text>'
-        )
-    lines.append(
-        f'<text x="{width / 2}" y="{height - 10}" text-anchor="middle" font-size="14">Turn index</text>'
-    )
-    lines.append(
-        f'<text transform="rotate(-90 {15} {height / 2})" x="15" y="{height / 2}" text-anchor="middle" font-size="14">Misaligned occurrences</text>'
-    )
-    lines.append("</svg>")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(lines), encoding="utf-8")
-
-
 def plot_distribution(
     counter: Counter[int],
     *,
     output_path: Path,
     total_runs: int,
     max_turns: int,
+    title_suffix: str = "",
 ) -> Path:
-    try:
-        import matplotlib.pyplot as plt  # type: ignore
-    except ModuleNotFoundError:
-        svg_path = (
-            output_path
-            if output_path.suffix.lower() == ".svg"
-            else output_path.with_suffix(".svg")
-        )
-        turns_range = range(1, max_turns + 1)
-        _plot_svg(
-            counter,
-            output_path=svg_path,
-            total_runs=total_runs,
-            turns_range=turns_range,
-        )
-        return svg_path
+    """
+    Generates a publication-quality bar chart of misalignment distribution using matplotlib.
+    """
+    # Ensure style settings are applied
+    set_publication_style()
 
     turns: Iterable[int] = range(1, max_turns + 1)
     counts = [counter.get(turn, 0) for turn in turns]
     labels = [str(t) for t in turns]
-    x = list(range(len(labels)))
-    plt.figure(figsize=(max(20, len(labels) * 0.3), 5))
-    width = min(0.6, 25 / max(1, len(labels)))  # auto-adjust bar width to reduce overlap
-    plt.bar(x, counts, color="#3b82f6", alpha=0.9, width=width)
-    plt.xlabel("Turn index")
-    plt.ylabel("Misaligned occurrences")
-    plt.title(f"Misaligned turn distribution (runs={total_runs}, issues={sum(counts)})")
-    plt.xticks(x, labels)
-    plt.grid(axis="y", linestyle="--", alpha=0.4)
-    plt.tight_layout()
+    x_pos = list(range(len(labels)))
+
+    # Use fixed standard figure dimensions (e.g., ~7 inches wide for double-column fit)
+    # instead of dynamic sizing, to ensure consistency across publications.
+    fig, ax = plt.subplots(figsize=(7.0, 3.5))
+
+    # Plot bars using the defined color cycle (Slate Blue)
+    # zorder=3 ensures bars are on top of the grid.
+    bars = ax.bar(x_pos, counts, width=0.75, align="center", zorder=3)
+
+    # Add count labels on top of bars if they aren't too crowded
+    if len(x_pos) < 30:
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:
+                ax.annotate(
+                    f"{height}",
+                    xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 2),  # 2 points vertical offset
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+    # Remove top and right spines for a cleaner, more modern look
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Configure grid
+    # Only show horizontal grid lines, make them thin, gray, and placed behind bars (zorder=0).
+    ax.yaxis.grid(
+        True, linestyle="--", which="major", color="grey", alpha=0.4, zorder=0
+    )
+    ax.xaxis.grid(False)
+
+    # Axis Labels and Title
+    ax.set_xlabel("Turn Index (t)", labelpad=8)
+    ax.set_ylabel("Frequency of Misalignment", labelpad=8)
+
+    # Concise title with essential N-numbers
+    total_issues = sum(counts)
+    issue_type = (
+        "First Misalignments"
+        if "first" in title_suffix.lower()
+        else "Total Misalignments"
+    )
+    ax.set_title(
+        f"Distribution of {issue_type}\n(N={total_runs} Runs, Total Issues={total_issues})",
+        pad=15,
+    )
+
+    # X-axis Ticks Configuration
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(labels)
+
+    # If too many ticks, prevent overlap by rotating or sparsifying
+    if len(labels) > 20:
+        plt.xticks(rotation=45, ha="right")
+        # Optional: Show only every nth label if extremely crowded
+        # n = len(labels) // 20 or 1
+        # for i, label in enumerate(ax.xaxis.get_ticklabels()):
+        #     if i % n != 0: label.set_visible(False)
+
+    # Ensure integer ticks on Y-axis for counts
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    #  layout adjustments are handled by savefig.bbox = 'tight' in rcParams
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=150)
-    plt.close()
+
+    # Recommend PDF for vector graphics in publications, fall back to high-DPI PNG
+    save_kwargs = {}
+    if output_path.suffix.lower() == ".pdf":
+        save_kwargs = {"format": "pdf"}
+
+    plt.savefig(output_path, **save_kwargs)
+    plt.close(fig)
     return output_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot misaligned turn distribution.")
+    parser = argparse.ArgumentParser(
+        description="Plot misaligned turn distribution (Publication Quality)."
+    )
     parser.add_argument(
         "--run-dir",
         default="experiments/run_logs",
@@ -200,8 +245,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output",
-        default="experiments/misalignment_distribution.png",
-        help="Output path (PNG/SVG). A second file with suffix '_first' is generated for first misalignments.",
+        default="experiments/misalignment_distribution.pdf",  # Changed default to PDF for quality
+        help="Output path (PDF/PNG/SVG). A second file with suffix '_first' is generated for first misalignments. PDF recommended for publications.",
     )
     parser.add_argument(
         "--first-only",
@@ -236,78 +281,89 @@ def main() -> None:
         use_csv = True
 
     if use_csv:
+        print(f"[INFO] Loading data from CSV: {csv_path}")
         overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns = (
             collect_from_results_csv(csv_path)
         )
     else:
+        print(f"[INFO] Loading data from JSON logs in: {run_dir}")
         overall, first_hits, max_turn_seen, total_runs, runs_with_issue, run_turns = (
             collect_misalignment_turns(run_dir)
         )
     if total_runs == 0:
-        print("[WARN] No run logs found.")
+        print("[WARN] No run data found.")
         return
     if not overall:
-        print("[WARN] No misaligned turns found in run logs.")
+        print("[WARN] No misaligned turns found in data.")
+
     max_turns = args.max_turns or max(max_turn_seen, max(overall) if overall else 0)
     if max_turns <= 0:
         max_turns = 1
+
+    # Matrix output logic (unchanged)
     if args.matrix_output:
         out_path = Path(args.matrix_output)
         header = ["run"] + [str(t) for t in range(1, max_turns + 1)]
+
         def _sort_key(x: str):
             try:
                 return int(x)
             except Exception:
                 return x
+
         runs_sorted = sorted(run_turns.keys(), key=_sort_key)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(header)
             for run_id in runs_sorted:
                 turns = run_turns.get(run_id, set())
-                row = [run_id] + [1 if t in turns else 0 for t in range(1, max_turns + 1)]
+                row = [run_id] + [
+                    1 if t in turns else 0 for t in range(1, max_turns + 1)
+                ]
                 writer.writerow(row)
         print(f"[INFO] Saved misalignment matrix to {out_path}")
 
     output_path = Path(args.output)
+
+    # Plotting logic
     if args.first_only:
         if not first_hits:
-            print("[WARN] No first misalignment data available.")
+            print("[WARN] No first misalignment data available to plot.")
             return
         saved = plot_distribution(
             first_hits,
             output_path=output_path,
             total_runs=total_runs,
             max_turns=max_turns,
+            title_suffix="(First Only)",
         )
         print(f"[INFO] Saved first-misalignment plot to {saved}")
-        for turn in sorted(first_hits):
-            print(f"Turn {turn:>2}: {first_hits[turn]} first misalignments")
         return
 
-    saved_overall = plot_distribution(
-        overall,
-        output_path=output_path,
-        total_runs=total_runs,
-        max_turns=max_turns,
-    )
-    print(f"[INFO] Saved distribution plot to {saved_overall}")
-    for turn in sorted(overall):
-        print(f"Turn {turn:>2}: {overall[turn]} misalignments")
+    if overall:
+        saved_overall = plot_distribution(
+            overall,
+            output_path=output_path,
+            total_runs=total_runs,
+            max_turns=max_turns,
+            title_suffix="(Overall)",
+        )
+        print(f"[INFO] Saved overall distribution plot to {saved_overall}")
 
     if first_hits:
-        first_path = saved_overall.with_name(
-            saved_overall.stem + "_first" + saved_overall.suffix
+        # Generate the '_first' filename while preserving extension
+        first_path = output_path.with_name(
+            f"{output_path.stem}_first{output_path.suffix}"
         )
         saved_first = plot_distribution(
             first_hits,
             output_path=first_path,
             total_runs=total_runs,
             max_turns=max_turns,
+            title_suffix="(First Only)",
         )
         print(f"[INFO] Saved first-misalignment plot to {saved_first}")
-        for turn in sorted(first_hits):
-            print(f"Turn {turn:>2}: {first_hits[turn]} first misalignments")
 
 
 if __name__ == "__main__":

@@ -2051,7 +2051,7 @@ class StructuredChatAgent:
             allow_web = True
         common_rules = [
             "Return only a JSON object that matches the schema above—no code fences or additional commentary.",
-            "`llm_reply.message` must be natural language directed to the user.",
+            "`llm_reply.message` must be natural language directed to the user (no JSON/code fences/ internal terms); if `actions` is non-empty, include 1–3 sentences summarizing what will be done and the expected outputs, when mentioning specific methods/models/terms, name them precisely and state how they will be used or their intended effect (key steps/ parameters if needed); if `actions` is empty, answer directly or ask specific questions.",
             "Fill `actions` in execution order (`order` starts at 1); use an empty array if no actions are required.",
             "Use the `kind`/`name` pairs from the action catalog without inventing new values.",
             "Preserve any user-provided identifiers, citations, alert numbers, or source names exactly in both text and action parameters; do not substitute or paraphrase them.",
