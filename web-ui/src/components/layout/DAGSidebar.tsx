@@ -2,8 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Typography, Button, Space, Tooltip, Empty, message } from 'antd';
 import {
   NodeIndexOutlined,
-  FullscreenOutlined,
-  SettingOutlined,
   ReloadOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
@@ -162,22 +160,6 @@ const DAGSidebar: React.FC = () => {
                 size="small"
                 icon={dagVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
                 onClick={() => setDagVisible(!dagVisible)}
-              />
-            </Tooltip>
-            
-            <Tooltip title="View in fullscreen">
-              <Button
-                type="text"
-                size="small"
-                icon={<FullscreenOutlined />}
-              />
-            </Tooltip>
-            
-            <Tooltip title="Settings">
-              <Button
-                type="text"
-                size="small"
-                icon={<SettingOutlined />}
               />
             </Tooltip>
           </Space>

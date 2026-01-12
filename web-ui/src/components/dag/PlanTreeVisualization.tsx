@@ -53,22 +53,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   }, [selectedTaskId]);
 
-  // Status colour
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return '#52c41a';
-      case 'running':
-        return '#1890ff';
-      case 'pending':
-        return '#faad14';
-      case 'failed':
-        return '#ff4d4f';
-      default:
-        return '#d9d9d9';
-    }
-  };
-
   // Build nested tree structure
   const buildTree = useMemo((): TreeNode[] => {
     if (!tasks || tasks.length === 0) return [];
@@ -116,7 +100,8 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     node: TreeNode,
     isLast: boolean,
     prefix: string = '',
-    isRoot: boolean = false
+    isRoot: boolean = false,
+    depth: number = 0
   ): React.ReactNode => {
     const { task, children } = node;
     const hasChildren = children.length > 0;
@@ -134,6 +119,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
         <div 
           className={`plan-tree-node-content task-type-${task.task_type?.toLowerCase()} ${isSelected ? 'selected' : ''}`}
           onClick={() => handleSelectTask(task)}
+          data-depth={depth}
         >
           <span className="plan-tree-connector">{prefix}{connector}</span>
           
@@ -151,15 +137,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
             placement="right"
           >
             <span className="plan-tree-node-info">
-              <span 
-                className="plan-node-name"
-                style={{ 
-                  color: getStatusColor(task.status),
-                  fontWeight: task.task_type?.toLowerCase() === 'root' ? 'bold' : 'normal',
-                }}
-              >
-                {displayName}
-              </span>
+              <span className="plan-node-name">{displayName}</span>
             </span>
           </Tooltip>
         </div>
@@ -171,7 +149,8 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
                 child,
                 index === children.length - 1,
                 prefix + childPrefix,
-                false
+                false,
+                depth + 1
               )
             )}
           </div>
@@ -207,7 +186,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
   return (
     <div className="plan-tree-visualization-container" style={{ height }}>
       <div className="plan-tree-content">
-        {buildTree.map(rootNode => renderTreeNode(rootNode, true, '', true))}
+        {buildTree.map(rootNode => renderTreeNode(rootNode, true, '', true, 0))}
       </div>
     </div>
   );

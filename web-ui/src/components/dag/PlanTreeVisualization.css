@@ -2,16 +2,16 @@
   overflow-y: auto;
   overflow-x: auto;
   padding: 8px;
-  background: #fafafa;
-  border-radius: 6px;
+  background: #f7f9fb;
+  border: 1px solid #e5e9ef;
+  border-radius: 4px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
 }
 
 .plan-tree-content {
   min-width: fit-content;
-  padding: 6px;
-  background: white;
-  border-radius: 4px;
+  padding: 2px 0;
+  background: transparent;
 }
 
 .plan-tree-node {
@@ -23,42 +23,35 @@
 .plan-tree-node-content {
   display: flex;
   align-items: center;
-  padding: 4px 6px;
-  margin: 1px 0;
+  padding: 2px 4px;
+  margin: 0;
   cursor: pointer;
-  transition: all 0.2s ease;
-  border-radius: 3px;
-  min-height: 28px;
+  border-radius: 2px;
+  min-height: 24px;
 }
 
 .plan-tree-node-content:hover {
-  background: rgba(24, 144, 255, 0.08);
-  transform: translateX(2px);
+  background: #eef2f6;
 }
 
 .plan-tree-node-content.selected {
-  background: rgba(24, 144, 255, 0.15);
-  border-left: 3px solid #1890ff;
+  background: #e8edf3;
 }
 
 .plan-tree-node-content.task-type-root {
-  background: linear-gradient(90deg, rgba(114, 46, 209, 0.08) 0%, rgba(114, 46, 209, 0.03) 100%);
-  border-left: 3px solid #722ed1;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .plan-tree-node-content.task-type-composite {
-  background: linear-gradient(90deg, rgba(24, 144, 255, 0.06) 0%, rgba(24, 144, 255, 0.02) 100%);
-  border-left: 2px solid #1890ff;
+  font-weight: 500;
 }
 
 .plan-tree-node-content.task-type-atomic {
-  background: linear-gradient(90deg, rgba(82, 196, 26, 0.04) 0%, rgba(82, 196, 26, 0.01) 100%);
-  border-left: 2px solid #52c41a;
+  font-weight: 400;
 }
 
 .plan-tree-connector {
-  color: #8c8c8c;
+  color: #8a98a8;
   font-weight: normal;
   white-space: pre;
   user-select: none;
@@ -71,21 +64,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   margin: 0 4px 0 2px;
-  font-size: 8px;
-  color: #1890ff;
-  background: rgba(24, 144, 255, 0.1);
-  border-radius: 3px;
+  font-size: 9px;
+  color: #5a6b7c;
+  background: transparent;
+  border-radius: 2px;
   cursor: pointer;
-  transition: all 0.2s ease;
   user-select: none;
 }
 
 .plan-tree-collapse-btn:hover {
-  background: rgba(24, 144, 255, 0.2);
-  transform: scale(1.1);
+  background: #eef2f6;
 }
 
 .plan-tree-node-info {
@@ -107,36 +98,46 @@
 
 .plan-node-name {
   font-size: 12px;
-  font-weight: 500;
-  transition: color 0.2s ease;
+  font-weight: 400;
+  color: #2b3a4a;
 }
 
-.plan-tree-node-content:hover .plan-node-name {
-  color: #1890ff !important;
+.plan-tree-node-content[data-depth="0"] .plan-node-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #1f2f3d;
+}
+
+.plan-tree-node-content[data-depth="1"] .plan-node-name {
+  font-weight: 500;
+  font-size: 12.5px;
+  color: #2a3b4d;
+}
+
+.plan-tree-node-content[data-depth="2"] .plan-node-name {
+  font-weight: 500;
+  font-size: 12px;
+  color: #3a4b5f;
+}
+
+.plan-tree-node-content[data-depth="3"] .plan-node-name {
+  font-size: 11.5px;
+  color: #506174;
+}
+
+.plan-tree-node-content[data-depth="4"] .plan-node-name {
+  font-size: 11px;
+  color: #66788c;
+}
+
+.plan-tree-node-content[data-depth="5"] .plan-node-name,
+.plan-tree-node-content[data-depth="6"] .plan-node-name,
+.plan-tree-node-content[data-depth="7"] .plan-node-name {
+  font-size: 10.5px;
+  color: #8193a6;
 }
 
 .plan-tree-children {
   margin: 0;
   padding: 0;
-}
-
-/* Scrollbar styling */
-.plan-tree-visualization-container::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.plan-tree-visualization-container::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 3px;
-}
-
-.plan-tree-visualization-container::-webkit-scrollbar-thumb {
-  background: rgba(24, 144, 255, 0.3);
-  border-radius: 3px;
-  transition: background 0.2s ease;
-}
-
-.plan-tree-visualization-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(24, 144, 255, 0.5);
 }
