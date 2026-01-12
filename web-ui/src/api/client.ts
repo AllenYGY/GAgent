@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { ApiResponse } from '../types/index';
 import { ENV } from '@/config/env';
+import { useSystemStore } from '@store/system';
 
 // 创建axios实例
 const createApiClient = (): AxiosInstance => {
@@ -18,6 +19,7 @@ const createApiClient = (): AxiosInstance => {
       // 记住用户要求：禁用Mock模式，使用真实API
       // 确保不发送任何Mock相关的headers
       console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+      useSystemStore.getState().incrementApiCalls();
       return config;
     },
     (error) => {

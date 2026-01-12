@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { App as AntdApp, Layout } from 'antd';
 import { useSystemStore } from '@store/system';
@@ -16,7 +16,8 @@ import { ENV } from '@/config/env';
 
 function App() {
   const { message } = AntdApp.useApp();
-  const { setSystemStatus, setApiConnected } = useSystemStore();
+  const { setSystemStatus, setApiConnected, refreshApiCallRate } = useSystemStore();
+  const [siderCollapsed, setSiderCollapsed] = useState(false);
 
   // Initialize system status checks
   useEffect(() => {
@@ -34,7 +35,7 @@ function App() {
     window.addEventListener('unhandledrejection', handleRejection);
 
     const initializeApp = async () => {
-      console.log('🚀 Initializing AI Task Orchestration System...');
+      console.log('🚀 Initializing Research Agent...');
       console.log('⚡ Running in PRODUCTION mode - using REAL APIs (No Mock)');
 
       try {
@@ -92,12 +93,22 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      refreshApiCallRate();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshApiCallRate]);
+
   return (
     <ErrorBoundary>
       <Layout style={{ minHeight: '100vh' }}>
         <AppHeader />
         <Layout>
-          <AppSider />
+          <AppSider
+            collapsed={siderCollapsed}
+            onToggle={() => setSiderCollapsed((prev) => !prev)}
+          />
           <Layout.Content style={{ padding: '24px', background: '#f0f2f5' }}>
             <ErrorBoundary>
               <Routes>

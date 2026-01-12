@@ -40,7 +40,7 @@ class SessionTitleService:
         self,
         *,
         message_limit: int = 10,
-        max_length: int = 18,
+        max_length: Optional[int] = None,
     ) -> None:
         self.message_limit = message_limit
         self.max_length = max_length
@@ -232,7 +232,8 @@ class SessionTitleService:
             task_clean = self._enforce_length(task_name.strip(), clamp=12)
             if task_clean:
                 merged = f"{title} · {task_clean}"
-                return self._enforce_length(merged, clamp=self.max_length + 8)
+                clamp = self.max_length + 8 if self.max_length is not None else None
+                return self._enforce_length(merged, clamp=clamp)
         return title
 
     def _heuristic_from_history(self, history: Sequence[Any]) -> Optional[str]:
@@ -266,7 +267,9 @@ class SessionTitleService:
 
     def _enforce_length(self, text: str, *, clamp: Optional[int] = None) -> str:
         """Clamp text to a maximum length with an ellipsis when appropriate."""
-        limit = clamp or self.max_length
+        if self.max_length is None:
+            return text
+        limit = clamp if clamp is not None else self.max_length
         if len(text) <= limit:
             return text
         return text[: limit - 1].rstrip("，,、.。;；!?！？」》）") + "…"

@@ -1,19 +1,22 @@
 import React from 'react';
-import { Layout, Menu } from 'antd';
+import { Button, Layout, Menu, Tooltip } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   DashboardOutlined,
   NodeIndexOutlined,
   ProjectOutlined,
-  SettingOutlined,
-  BarChartOutlined,
-  ToolOutlined,
-  BookOutlined,
   DatabaseOutlined,
   MessageOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
+
+interface AppSiderProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
 
 interface MenuItem {
   key: string;
@@ -53,33 +56,9 @@ const menuItems: MenuItem[] = [
     label: 'Memory Vault',
     path: '/memory',
   },
-  {
-    key: 'analytics',
-    icon: <BarChartOutlined />,
-    label: 'Analytics',
-    path: '/analytics',
-  },
-  {
-    key: 'tools',
-    icon: <ToolOutlined />,
-    label: 'Toolbox',
-    path: '/tools',
-  },
-  {
-    key: 'templates',
-    icon: <BookOutlined />,
-    label: 'Templates',
-    path: '/templates',
-  },
-  {
-    key: 'system',
-    icon: <SettingOutlined />,
-    label: 'System Settings',
-    path: '/system',
-  },
 ];
 
-const AppSider: React.FC = () => {
+const AppSider: React.FC<AppSiderProps> = ({ collapsed, onToggle }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -94,13 +73,37 @@ const AppSider: React.FC = () => {
   };
 
   return (
-    <Sider width={200} className="app-sider">
+    <Sider
+      width={200}
+      collapsedWidth={64}
+      collapsed={collapsed}
+      trigger={null}
+      className="app-sider"
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: collapsed ? 'center' : 'flex-end',
+          padding: '8px 12px',
+        }}
+      >
+        <Tooltip title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <Button
+            type="text"
+            size="small"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={onToggle}
+            style={{ color: 'white' }}
+          />
+        </Tooltip>
+      </div>
       <Menu
         mode="inline"
         selectedKeys={selectedKeys}
         className="sider-menu"
         theme="dark"
         onClick={handleMenuClick}
+        inlineCollapsed={collapsed}
         items={menuItems.map(item => ({
           key: item.key,
           icon: item.icon,

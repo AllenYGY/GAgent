@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
@@ -65,6 +66,11 @@ plan_repository = PlanRepository()
 decomposer_settings = get_decomposer_settings()
 
 VALID_SEARCH_PROVIDERS = {"builtin", "perplexity"}
+EXPORT_FORMATS: Dict[str, Tuple[str, str]] = {
+    "md": ("text/markdown", "md"),
+    "json": ("application/json", "json"),
+    "txt": ("text/plain", "txt"),
+}
 plan_decomposer_service = PlanDecomposer(
     repo=plan_repository,
     settings=decomposer_settings,
@@ -200,11 +206,26 @@ class ChatSessionAutoTitleBulkRequest(ChatSessionAutoTitleRequest):
     limit: Optional[int] = Field(default=20, ge=1, le=200)
 
 
+class ChatSessionBulkDeleteRequest(BaseModel):
+    """Bulk delete/archive request."""
+
+    session_ids: List[str] = Field(default_factory=list)
+    archive: bool = False
+
+
 class ChatSessionAutoTitleBulkResponse(BaseModel):
     """Response for bulk auto-title operations."""
 
     results: List[ChatSessionAutoTitleResult]
     processed: int
+
+
+class ChatSessionBulkDeleteResponse(BaseModel):
+    """Response for bulk delete operations."""
+
+    deleted: List[str] = Field(default_factory=list)
+    archived: List[str] = Field(default_factory=list)
+    missing: List[str] = Field(default_factory=list)
 
 
 class ChatStatusResponse(BaseModel):
@@ -452,6 +473,70 @@ async def bulk_autotitle_chat_sessions(
     )
 
 
+@router.post("/sessions/bulk/delete", response_model=ChatSessionBulkDeleteResponse)
+async def bulk_delete_chat_sessions(
+    payload: ChatSessionBulkDeleteRequest,
+) -> ChatSessionBulkDeleteResponse:
+    """Delete or archive multiple chat sessions."""
+    from ..database import get_db  # lazy import
+
+    raw_ids = [str(item).strip() for item in payload.session_ids if str(item).strip()]
+    session_ids = list(dict.fromkeys(raw_ids))
+    if not session_ids:
+        raise HTTPException(status_code=400, detail="No session ids provided")
+
+    try:
+        with get_db() as conn:
+            placeholders = ", ".join(["?"] * len(session_ids))
+            rows = conn.execute(
+                f"SELECT id FROM chat_sessions WHERE id IN ({placeholders})",
+                session_ids,
+            ).fetchall()
+            found_ids = {row["id"] for row in rows}
+            matched_ids = [sid for sid in session_ids if sid in found_ids]
+            missing_ids = [sid for sid in session_ids if sid not in found_ids]
+
+            if matched_ids:
+                if payload.archive:
+                    conn.executemany(
+                        """
+                        UPDATE chat_sessions
+                        SET is_active=0, updated_at=CURRENT_TIMESTAMP
+                        WHERE id=?
+                        """,
+                        [(sid,) for sid in matched_ids],
+                    )
+                    logger.info(
+                        "Archived %s chat sessions via bulk delete",
+                        len(matched_ids),
+                    )
+                else:
+                    conn.executemany(
+                        "DELETE FROM chat_sessions WHERE id=?",
+                        [(sid,) for sid in matched_ids],
+                    )
+                    logger.info(
+                        "Deleted %s chat sessions via bulk delete",
+                        len(matched_ids),
+                    )
+                conn.commit()
+
+        if payload.archive:
+            return ChatSessionBulkDeleteResponse(
+                archived=matched_ids, missing=missing_ids
+            )
+        return ChatSessionBulkDeleteResponse(
+            deleted=matched_ids, missing=missing_ids
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to bulk delete chat sessions: %s", exc)
+        raise HTTPException(
+            status_code=500, detail="Failed to bulk delete sessions"
+        ) from exc
+
+
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_chat_session(
     session_id: str, archive: bool = Query(False)
@@ -575,6 +660,48 @@ async def get_chat_history(session_id: str, limit: int = 50):
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Failed to get chat history: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_chat_session(
+    session_id: str,
+    format: Literal["md", "json", "txt"] = Query("md"),
+):
+    """Export the full conversation history for a session."""
+    from ..database import get_db  # lazy import
+
+    try:
+        with get_db() as conn:
+            session_info = _fetch_session_info(conn, session_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to load session %s: %s", session_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to load session") from exc
+
+    if not session_info:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = _load_chat_history(session_id, limit=None)
+    exported_at_dt = datetime.now(timezone.utc)
+    exported_at = exported_at_dt.isoformat()
+    title = session_info.get("name") or session_info.get("plan_title") or session_id
+    export_messages = [_build_export_message(msg) for msg in messages]
+
+    content_type, extension = EXPORT_FORMATS[format]
+    filename = _format_export_filename(title, session_id, extension, exported_at_dt)
+
+    if format == "json":
+        content = _render_export_json(
+            session_id, title, exported_at, export_messages
+        )
+    elif format == "txt":
+        content = _render_export_text(export_messages)
+    else:
+        content = _render_export_markdown(
+            session_id, title, exported_at, export_messages
+        )
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=content, media_type=content_type, headers=headers)
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -1141,23 +1268,143 @@ def _save_chat_message(
     return None
 
 
-def _load_chat_history(session_id: str, limit: int = 50) -> List[ChatMessage]:
+def _sanitize_filename_component(value: Optional[str], fallback: str) -> str:
+    base = (value or "").strip()
+    candidate = base or fallback
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate)
+    sanitized = sanitized.strip("._-")
+    sanitized = sanitized[:60] if sanitized else fallback
+    return sanitized or fallback
+
+
+def _format_export_filename(
+    title: Optional[str],
+    session_id: str,
+    extension: str,
+    exported_at: datetime,
+) -> str:
+    safe_title = _sanitize_filename_component(title, f"session_{session_id[:8]}")
+    timestamp = exported_at.strftime("%Y%m%d_%H%M")
+    return f"conversation_{safe_title}_{timestamp}.{extension}"
+
+
+def _extract_tool_results(metadata: Dict[str, Any]) -> Any:
+    if not metadata:
+        return []
+    tool_results = metadata.get("tool_results")
+    return tool_results if tool_results is not None else []
+
+
+def _build_export_message(message: ChatMessage) -> Dict[str, Any]:
+    metadata = (
+        dict(message.metadata) if isinstance(message.metadata, dict) else {}
+    )
+    tool_results = _extract_tool_results(metadata)
+    return {
+        "role": message.role,
+        "content": message.content,
+        "timestamp": message.timestamp,
+        "metadata": metadata,
+        "tool_results": tool_results,
+    }
+
+
+def _render_export_json(
+    session_id: str,
+    title: Optional[str],
+    exported_at: str,
+    messages: List[Dict[str, Any]],
+) -> str:
+    payload = {
+        "session_id": session_id,
+        "title": title,
+        "exported_at": exported_at,
+        "messages": messages,
+    }
+    return f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n"
+
+
+def _render_export_markdown(
+    session_id: str,
+    title: Optional[str],
+    exported_at: str,
+    messages: List[Dict[str, Any]],
+) -> str:
+    lines = [
+        "# Conversation Export",
+        f"- title: {title or ''}",
+        f"- session_id: {session_id}",
+        f"- exported_at: {exported_at}",
+        "",
+    ]
+    for message in messages:
+        role = message.get("role") or ""
+        timestamp = message.get("timestamp") or ""
+        header = f"## {role}" if not timestamp else f"## {role} - {timestamp}"
+        lines.append(header)
+        lines.append(message.get("content") or "")
+        lines.append("")
+        lines.append("### metadata")
+        lines.append("```json")
+        lines.append(
+            json.dumps(message.get("metadata") or {}, ensure_ascii=False, indent=2)
+        )
+        lines.append("```")
+        lines.append("")
+        lines.append("### tool_results")
+        lines.append("```json")
+        tool_results = message.get("tool_results")
+        lines.append(
+            json.dumps(
+                tool_results if tool_results is not None else [],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        lines.append("```")
+        lines.append("")
+    return f"{'\n'.join(lines).strip()}\n"
+
+
+def _render_export_text(messages: List[Dict[str, Any]]) -> str:
+    lines: List[str] = []
+    for message in messages:
+        role = message.get("role") or ""
+        timestamp = message.get("timestamp") or ""
+        header = f"[{role}] {timestamp}".rstrip()
+        lines.append(header)
+        lines.append(message.get("content") or "")
+        metadata = message.get("metadata") or {}
+        tool_results = message.get("tool_results")
+        tool_results_payload = tool_results if tool_results is not None else []
+        lines.append(f"metadata: {json.dumps(metadata, ensure_ascii=False)}")
+        lines.append(
+            f"tool_results: {json.dumps(tool_results_payload, ensure_ascii=False)}"
+        )
+        lines.append("")
+    return f"{'\n'.join(lines).strip()}\n"
+
+
+def _load_chat_history(
+    session_id: str, limit: Optional[int] = 50
+) -> List[ChatMessage]:
     """Load session history."""
     try:
         from ..database import get_db  # lazy import
 
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            query = """
                 SELECT role, content, metadata, created_at
                 FROM chat_messages
                 WHERE session_id = ?
                 ORDER BY created_at ASC
-                LIMIT ?
-                """,
-                (session_id, limit),
-            )
+            """
+            params: List[Any] = [session_id]
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            cursor.execute(query, params)
             rows = cursor.fetchall()
 
         return [

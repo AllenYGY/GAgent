@@ -21,8 +21,20 @@ interface SystemState {
   
   // System statistics
   incrementApiCalls: () => void;
+  refreshApiCallRate: () => void;
   updateSystemLoad: (load: Partial<SystemStatus['system_load']>) => void;
 }
+
+const API_CALL_WINDOW_MS = 60_000;
+const apiCallTimestamps: number[] = [];
+
+const pruneApiCalls = (now: number): number => {
+  const cutoff = now - API_CALL_WINDOW_MS;
+  while (apiCallTimestamps.length > 0 && apiCallTimestamps[0] < cutoff) {
+    apiCallTimestamps.shift();
+  }
+  return apiCallTimestamps.length;
+};
 
 export const useSystemStore = create<SystemState>()(
   subscribeWithSelector((set, get) => ({
@@ -67,10 +79,30 @@ export const useSystemStore = create<SystemState>()(
         ...state.systemStatus,
         system_load: {
           ...state.systemStatus.system_load,
-          api_calls_per_minute: state.systemStatus.system_load.api_calls_per_minute + 1,
+          api_calls_per_minute: (() => {
+            const now = Date.now();
+            apiCallTimestamps.push(now);
+            return pruneApiCalls(now);
+          })(),
         },
       },
     })),
+
+    refreshApiCallRate: () => set((state) => {
+      const nextCount = pruneApiCalls(Date.now());
+      if (nextCount === state.systemStatus.system_load.api_calls_per_minute) {
+        return state;
+      }
+      return {
+        systemStatus: {
+          ...state.systemStatus,
+          system_load: {
+            ...state.systemStatus.system_load,
+            api_calls_per_minute: nextCount,
+          },
+        },
+      };
+    }),
     
     // Update system load
     updateSystemLoad: (load) => set((state) => ({

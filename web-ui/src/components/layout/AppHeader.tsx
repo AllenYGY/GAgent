@@ -1,28 +1,34 @@
 import React from 'react';
-import { Layout, Button, Badge, Tooltip, Space, Typography } from 'antd';
+import { Layout, Tooltip, Space, Typography } from 'antd';
 import {
   RobotOutlined,
   ApiOutlined,
   DatabaseOutlined,
-  BellOutlined,
-  SettingOutlined,
-  MessageOutlined,
 } from '@ant-design/icons';
 import { useSystemStore } from '@store/system';
-import { useChatStore } from '@store/chat';
+import { useTasksStore } from '@store/tasks';
 
 const { Header } = Layout;
 const { Text } = Typography;
 
 const AppHeader: React.FC = () => {
   const { systemStatus, apiConnected } = useSystemStore();
-  const { toggleChatPanel, chatPanelVisible } = useChatStore();
+  const { activeTasks, hasTasks } = useTasksStore((state) => {
+    const count = state.tasks.reduce((total, task) => {
+      if (task.status === 'pending' || task.status === 'running') {
+        return total + 1;
+      }
+      return total;
+    }, 0);
+    return { activeTasks: count, hasTasks: state.tasks.length > 0 };
+  });
+  const activeTaskCount = hasTasks ? activeTasks : systemStatus.active_tasks;
 
   return (
     <Header className="app-header">
       <div className="app-logo">
         <RobotOutlined className="logo-icon" />
-        <span>AI Task Orchestration System</span>
+        <span>Research Agent</span>
       </div>
       
       <div className="app-header-actions">
@@ -54,49 +60,13 @@ const AppHeader: React.FC = () => {
           <Tooltip title="Active tasks">
             <div className="system-status">
               <Text style={{ color: 'white', fontSize: 12 }}>
-                Active tasks: {systemStatus.active_tasks}
+                Active tasks: {activeTaskCount}
               </Text>
             </div>
           </Tooltip>
 
-          <Tooltip title="API calls per minute">
-            <div className="system-status">
-              <Text style={{ color: 'white', fontSize: 12 }}>
-                API: {systemStatus.system_load.api_calls_per_minute}/min
-              </Text>
-            </div>
-          </Tooltip>
         </Space>
 
-        {/* Action buttons */}
-        <Space>
-          <Tooltip title="Notifications">
-            <Badge count={0} size="small">
-              <Button 
-                type="text" 
-                icon={<BellOutlined />} 
-                style={{ color: 'white' }}
-              />
-            </Badge>
-          </Tooltip>
-
-          <Tooltip title={chatPanelVisible ? 'Hide chat panel' : 'Show chat panel'}>
-            <Button 
-              type="text" 
-              icon={<MessageOutlined />} 
-              style={{ color: 'white' }}
-              onClick={toggleChatPanel}
-            />
-          </Tooltip>
-
-          <Tooltip title="System settings">
-            <Button 
-              type="text" 
-              icon={<SettingOutlined />} 
-              style={{ color: 'white' }}
-            />
-          </Tooltip>
-        </Space>
       </div>
     </Header>
   );

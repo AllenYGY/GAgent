@@ -99,9 +99,6 @@ const ChatMainArea: React.FC = () => {
   };
 
   const handleProviderChange = async (value: string | undefined) => {
-    if (!currentSession) {
-      return;
-    }
     try {
       await setDefaultSearchProvider((value as 'builtin' | 'perplexity') ?? null);
     } catch (err) {
@@ -235,13 +232,6 @@ const ChatMainArea: React.FC = () => {
 
           {/* Context details and memory toggle */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {(selectedTask || currentPlan || currentPlanTitle || currentTaskName) && (
-              <div style={{ fontSize: 12, color: '#666', textAlign: 'right' }}>
-                {(currentPlan || currentPlanTitle) && <div>Current plan: {currentPlan || currentPlanTitle}</div>}
-                {(selectedTask || currentTaskName) && <div>Selected task: {selectedTask?.name || currentTaskName}</div>}
-              </div>
-            )}
-
             {/* Memory toggle */}
             <Tooltip title={memoryEnabled ? 'Memory augmentation enabled' : 'Memory augmentation disabled'}>
               <Space size="small">
@@ -382,7 +372,7 @@ const ChatMainArea: React.FC = () => {
                 options={providerOptions}
                 allowClear
                 onChange={handleProviderChange}
-                disabled={!currentSession || isProcessing}
+                disabled={isProcessing}
                 loading={isUpdatingProvider}
               />
               <Button

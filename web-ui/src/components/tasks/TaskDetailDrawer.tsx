@@ -32,11 +32,11 @@ const statusColorMap: Record<string, string> = {
 };
 
 const statusLabelMap: Record<string, string> = {
-  pending: '待执行',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
-  skipped: '已跳过',
+  pending: 'Pending',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  skipped: 'Skipped',
 };
 
 const TaskDetailDrawer: React.FC = () => {
@@ -124,7 +124,7 @@ const TaskDetailDrawer: React.FC = () => {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       if (!currentPlanId || !selectedTaskId) {
-        throw new Error('缺少计划或任务信息，无法获取执行结果');
+        throw new Error('Missing plan or task information; unable to fetch execution result.');
       }
       return planTreeApi.getTaskResult(currentPlanId, selectedTaskId);
     },
@@ -190,8 +190,8 @@ const TaskDetailDrawer: React.FC = () => {
       await navigator.clipboard.writeText(text);
       message.success(successMessage);
     } catch (error) {
-      console.warn('复制失败', error);
-      message.error('复制失败，请手动复制内容');
+      console.warn('Copy failed', error);
+      message.error('Copy failed. Please copy manually.');
     }
   }, []);
 
@@ -203,7 +203,7 @@ const TaskDetailDrawer: React.FC = () => {
       task: activeTask,
       result: taskResult ?? cachedResult ?? null,
     };
-    void handleCopyJSON(payload, '任务详情已复制');
+    void handleCopyJSON(payload, 'Task details copied.');
   }, [activeTask, taskResult, cachedResult, handleCopyJSON]);
 
   const handleDependencyClick = useCallback(
@@ -223,7 +223,7 @@ const TaskDetailDrawer: React.FC = () => {
 
   const renderDependencies = () => {
     if (!activeTask?.dependencies || activeTask.dependencies.length === 0) {
-      return <Text type="secondary">无依赖</Text>;
+      return <Text type="secondary">No dependencies</Text>;
     }
     return (
       <Space wrap size={6}>
@@ -234,7 +234,7 @@ const TaskDetailDrawer: React.FC = () => {
             type="link"
             onClick={() => handleDependencyClick(dep)}
           >
-            任务 #{dep}
+            Task #{dep}
           </Button>
         ))}
       </Space>
@@ -250,7 +250,7 @@ const TaskDetailDrawer: React.FC = () => {
       const title =
         typeof section?.title === 'string' && section.title.trim().length > 0
           ? section.title
-          : `片段 ${index + 1}`;
+          : `Section ${index + 1}`;
       const content =
         typeof section?.content === 'string'
           ? section.content
@@ -264,18 +264,97 @@ const TaskDetailDrawer: React.FC = () => {
     return <Collapse size="small" bordered={false} items={items} />;
   };
 
+  const formatContextMetaValue = (value: unknown) => {
+    if (value === null || value === undefined) {
+      return <Text type="secondary">None</Text>;
+    }
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return <Text>{String(value)}</Text>;
+    }
+    return (
+      <Paragraph
+        code
+        style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
+      >
+        {JSON.stringify(value, null, 2)}
+      </Paragraph>
+    );
+  };
+
+  const renderContextMeta = () => {
+    const meta = activeTask?.context_meta;
+    if (meta === null || meta === undefined) {
+      return null;
+    }
+
+    let normalized: unknown = meta;
+    if (typeof meta === 'string') {
+      const trimmed = meta.trim();
+      if (!trimmed) {
+        return null;
+      }
+      try {
+        normalized = JSON.parse(trimmed);
+      } catch {
+        return (
+          <Paragraph
+            code
+            copyable
+            style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
+          >
+            {trimmed}
+          </Paragraph>
+        );
+      }
+    }
+
+    if (typeof normalized !== 'object' || normalized === null) {
+      return <Text>{String(normalized)}</Text>;
+    }
+
+    if (Array.isArray(normalized)) {
+      if (normalized.length === 0) {
+        return null;
+      }
+      return (
+        <Paragraph
+          code
+          copyable
+          style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
+        >
+          {JSON.stringify(normalized, null, 2)}
+        </Paragraph>
+      );
+    }
+
+    const entries = Object.entries(normalized as Record<string, unknown>);
+    if (entries.length === 0) {
+      return null;
+    }
+
+    return (
+      <Descriptions column={1} bordered size="small">
+        {entries.map(([key, value]) => (
+          <Descriptions.Item key={key} label={key}>
+            {formatContextMetaValue(value)}
+          </Descriptions.Item>
+        ))}
+      </Descriptions>
+    );
+  };
+
   const renderExecutionResult = () => {
     if (resultLoading && !taskResult && !cachedResult) {
       return (
         <div style={{ padding: '12px 0' }}>
-          <Spin tip="加载执行结果..." />
+          <Spin tip="Loading execution result..." />
         </div>
       );
     }
 
     const result = taskResult ?? cachedResult;
     if (!result) {
-      return <Text type="secondary">暂无执行结果</Text>;
+      return <Text type="secondary">No execution result yet</Text>;
     }
 
     return (
@@ -296,7 +375,7 @@ const TaskDetailDrawer: React.FC = () => {
             items={[
               {
                 key: 'notes',
-                label: `备注 (${result.notes.length})`,
+                label: `Notes (${result.notes.length})`,
                 children: (
                   <Space direction="vertical">
                     {result.notes.map((note, idx) => (
@@ -323,6 +402,8 @@ const TaskDetailDrawer: React.FC = () => {
     );
   };
 
+  const contextMetaContent = renderContextMeta();
+
   return (
     <Drawer
       width={480}
@@ -330,13 +411,13 @@ const TaskDetailDrawer: React.FC = () => {
         activeTask
           ? (
             <Space direction="vertical" size={0}>
-              <Title level={5} style={{ margin: 0 }}>
+          <Title level={5} style={{ margin: 0 }}>
                 {activeTask.name}
               </Title>
-              <Text type="secondary">任务 ID: {activeTask.id}</Text>
+              <Text type="secondary">Task ID: {activeTask.id}</Text>
             </Space>
             )
-          : '任务详情'
+          : 'Task details'
       }
       open={isTaskDrawerOpen}
       onClose={closeTaskDrawer}
@@ -350,118 +431,104 @@ const TaskDetailDrawer: React.FC = () => {
             disabled={!currentPlanId || !selectedTaskId}
             loading={tasksLoading || resultLoading}
           >
-            刷新
+            Refresh
           </Button>
           <Button
             icon={<CopyOutlined />}
             onClick={handleCopyTask}
             disabled={!activeTask}
           >
-            复制
+            Copy
           </Button>
         </Space>
       }
     >
       {!currentPlanId ? (
-        <Empty description="当前会话尚未绑定计划" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description="No plan bound to the current session" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : !selectedTaskId ? (
-        <Empty description="请选择一个任务查看详情" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description="Select a task to view details" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : tasksLoading && !activeTask ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 0' }}>
-          <Spin tip="加载任务信息..." />
+          <Spin tip="Loading task information..." />
         </div>
       ) : !activeTask ? (
-        <Empty description="未找到该任务，可能已被删除" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description="Task not found; it may have been deleted" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <section>
-            <Title level={5}>基础信息</Title>
+            <Title level={5}>Basic info</Title>
             <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="任务类型">
-                {activeTask.task_type ?? '未知'}
+              <Descriptions.Item label="Task type">
+                {activeTask.task_type ?? 'Unknown'}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label="Status">
                 <Tag color={statusColorMap[activeTask.status ?? 'pending'] ?? 'default'}>
                   {statusLabelMap[activeTask.status ?? 'pending'] ??
                     activeTask.status ??
-                    '未知'}
+                    'Unknown'}
                 </Tag>
               </Descriptions.Item>
               {activeTask.parent_id ? (
-                <Descriptions.Item label="父任务">
+                <Descriptions.Item label="Parent task">
                   <Button
                     type="link"
                     size="small"
                     onClick={() => handleDependencyClick(activeTask.parent_id!)}
                   >
-                    任务 #{activeTask.parent_id}
+                    Task #{activeTask.parent_id}
                   </Button>
                 </Descriptions.Item>
               ) : (
-                <Descriptions.Item label="父任务">无</Descriptions.Item>
+                <Descriptions.Item label="Parent task">None</Descriptions.Item>
               )}
-              <Descriptions.Item label="层级深度">
+              <Descriptions.Item label="Depth">
                 {activeTask.depth ?? 0}
-              </Descriptions.Item>
-              <Descriptions.Item label="创建时间">
-                {activeTask.created_at ? new Date(activeTask.created_at).toLocaleString() : '未知'}
-              </Descriptions.Item>
-              <Descriptions.Item label="更新时间">
-                {activeTask.updated_at ? new Date(activeTask.updated_at).toLocaleString() : '未知'}
               </Descriptions.Item>
             </Descriptions>
           </section>
 
           <section>
-            <Title level={5}>任务内容</Title>
+            <Title level={5}>Task details</Title>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
               <div>
-                <Text type="secondary">指令</Text>
+                <Text type="secondary">Instruction</Text>
                 <Paragraph
                   style={{ whiteSpace: 'pre-wrap' }}
                   copyable
-                  ellipsis={{ rows: 6, expandable: true, symbol: '展开' }}
+                  ellipsis={{ rows: 6, expandable: true, symbol: 'Expand' }}
                 >
-                  {activeTask.instruction || '暂无描述'}
+                  {activeTask.instruction || 'No description'}
                 </Paragraph>
               </div>
               <div>
-                <Text type="secondary">依赖任务</Text>
+                <Text type="secondary">Dependencies</Text>
                 {renderDependencies()}
               </div>
             </Space>
           </section>
 
           <section>
-            <Title level={5}>上下文信息</Title>
+            <Title level={5}>Context</Title>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
               {activeTask.context_combined ? (
                 <Paragraph
                   style={{ whiteSpace: 'pre-wrap' }}
                   copyable
-                  ellipsis={{ rows: 6, expandable: true, symbol: '展开' }}
+                  ellipsis={{ rows: 6, expandable: true, symbol: 'Expand' }}
                 >
                   {activeTask.context_combined}
                 </Paragraph>
               ) : (
-                <Text type="secondary">暂无上下文摘要</Text>
+                <Text type="secondary">No context summary</Text>
               )}
               {renderContextSections()}
-              {activeTask.context_meta && Object.keys(activeTask.context_meta).length > 0 && (
-                <Paragraph
-                  code
-                  copyable
-                  style={{ maxHeight: 200, overflow: 'auto' }}
-                >
-                  {JSON.stringify(activeTask.context_meta, null, 2)}
-                </Paragraph>
-              )}
+              {contextMetaContent}
             </Space>
           </section>
 
           {recentToolResults.length > 0 && (
             <section>
-              <Title level={5}>近期搜索摘要</Title>
+              <Title level={5}>Recent search summaries</Title>
               <Space direction="vertical" size="small" style={{ width: '100%' }}>
                 {recentToolResults.map((result, index) => (
                   <ToolResultCard
@@ -475,7 +542,7 @@ const TaskDetailDrawer: React.FC = () => {
           )}
 
           <section>
-            <Title level={5}>元数据</Title>
+            <Title level={5}>Metadata</Title>
             {activeTask.metadata && Object.keys(activeTask.metadata).length > 0 ? (
               <Paragraph
                 code
@@ -485,12 +552,12 @@ const TaskDetailDrawer: React.FC = () => {
                 {JSON.stringify(activeTask.metadata, null, 2)}
               </Paragraph>
             ) : (
-              <Text type="secondary">暂无元数据信息</Text>
+              <Text type="secondary">No metadata</Text>
             )}
           </section>
 
           <section>
-            <Title level={5}>执行结果</Title>
+            <Title level={5}>Execution result</Title>
             {renderExecutionResult()}
           </section>
         </Space>

@@ -147,6 +147,12 @@ export interface ChatSessionsResponse {
   offset: number;
 }
 
+export interface ChatSessionBulkDeleteResponse {
+  deleted: string[];
+  archived: string[];
+  missing: string[];
+}
+
 // 评估相关类型
 export interface EvaluationDimensions {
   relevance: number;

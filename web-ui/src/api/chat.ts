@@ -4,12 +4,38 @@ import type {
   ChatResponsePayload,
   ChatSessionsResponse,
   ChatSessionSummary,
+  ChatSessionBulkDeleteResponse,
   ChatStatusResponse,
   ChatSessionUpdatePayload,
   ChatSessionAutoTitleResult,
   ChatSessionAutoTitleBulkResponse,
   WebSearchProvider,
 } from '@/types';
+
+export type ConversationExportFormat = 'md' | 'json' | 'txt';
+
+const extractFilename = (disposition?: string | null): string | null => {
+  if (!disposition) {
+    return null;
+  }
+
+  const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch (error) {
+      console.warn('Failed to decode filename from content-disposition', error);
+    }
+  }
+
+  const quotedMatch = /filename="([^"]+)"/i.exec(disposition);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+
+  const plainMatch = /filename=([^;]+)/i.exec(disposition);
+  return plainMatch?.[1]?.trim() ?? null;
+};
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -110,6 +136,34 @@ export class ChatApi extends BaseApi {
     payload?: { session_ids?: string[]; force?: boolean; strategy?: string | null; limit?: number }
   ): Promise<ChatSessionAutoTitleBulkResponse> => {
     return this.post('/chat/sessions/autotitle/bulk', payload ?? {});
+  };
+
+  bulkDeleteSessions = async (payload: {
+    session_ids: string[];
+    archive?: boolean;
+  }): Promise<ChatSessionBulkDeleteResponse> => {
+    return this.post('/chat/sessions/bulk/delete', payload);
+  };
+
+  exportSession = async (
+    sessionId: string,
+    format: ConversationExportFormat = 'md'
+  ): Promise<{ blob: Blob; filename: string | null; contentType: string | null }> => {
+    const response = await this.client.get(`/chat/sessions/${sessionId}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    const contentType =
+      (response.headers?.['content-type'] as string | undefined) ?? null;
+    const disposition =
+      (response.headers?.['content-disposition'] as string | undefined) ?? null;
+    const filename = extractFilename(disposition);
+
+    return {
+      blob: response.data,
+      filename,
+      contentType,
+    };
   };
 }
 

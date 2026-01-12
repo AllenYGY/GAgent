@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List
@@ -66,7 +67,9 @@ async def search(
     }
 
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout, trust_env=True
+        ) as session:
             async with session.post(api_url, headers=headers, json=payload) as response:
                 text = await response.text()
                 if response.status != 200:
@@ -86,11 +89,32 @@ async def search(
                     ) from exc
     except WebSearchError:
         raise
-    except Exception as exc:  # pragma: no cover - network/runtime
-        logger.error("Perplexity search failed: %s", exc)
+    except asyncio.TimeoutError as exc:  # pragma: no cover - network/runtime
+        logger.error(
+            "Perplexity search timed out after %ss", settings.perplexity_timeout
+        )
+        raise WebSearchError(
+            code="timeout",
+            message=(
+                "Perplexity request timed out after "
+                f"{settings.perplexity_timeout}s"
+            ),
+            provider="perplexity",
+        ) from exc
+    except aiohttp.ClientError as exc:  # pragma: no cover - network/runtime
+        message = str(exc) or repr(exc)
+        logger.error("Perplexity search failed: %s", message)
         raise WebSearchError(
             code="request_failed",
-            message=str(exc),
+            message=message,
+            provider="perplexity",
+        ) from exc
+    except Exception as exc:  # pragma: no cover - network/runtime
+        message = str(exc) or repr(exc)
+        logger.error("Perplexity search failed: %s", message)
+        raise WebSearchError(
+            code="request_failed",
+            message=message,
             provider="perplexity",
         ) from exc
 

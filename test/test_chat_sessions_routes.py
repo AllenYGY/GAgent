@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Dict
 
@@ -32,6 +33,11 @@ def _create_session(record: Dict[str, object]) -> None:
             metadata_json = json.dumps(metadata, ensure_ascii=False)
         else:
             metadata_json = metadata
+        message_metadata = record.get("message_metadata")
+        if isinstance(message_metadata, dict):
+            message_metadata_json = json.dumps(message_metadata, ensure_ascii=False)
+        else:
+            message_metadata_json = message_metadata
         conn.execute(
             """
             INSERT INTO chat_sessions (
@@ -65,15 +71,37 @@ def _create_session(record: Dict[str, object]) -> None:
         )
         conn.execute(
             """
-            INSERT INTO chat_messages (session_id, role, content, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO chat_messages (session_id, role, content, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 record.get("id"),
                 record.get("message_role", "assistant"),
                 record.get("message_content", "hello"),
+                message_metadata_json,
                 record.get("last_message_at"),
             ),
+        )
+        conn.commit()
+
+
+def _insert_message(
+    session_id: str,
+    role: str,
+    content: str,
+    created_at: str,
+    metadata: Dict[str, object] | None = None,
+) -> None:
+    with get_db() as conn:
+        metadata_json = (
+            json.dumps(metadata, ensure_ascii=False) if isinstance(metadata, dict) else None
+        )
+        conn.execute(
+            """
+            INSERT INTO chat_messages (session_id, role, content, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (session_id, role, content, metadata_json, created_at),
         )
         conn.commit()
 
@@ -253,6 +281,88 @@ def test_delete_session_archive_flag(chat_client: TestClient):
     assert message_row["cnt"] == 1
 
 
+def test_bulk_delete_sessions(chat_client: TestClient):
+    _clear_chat_tables()
+
+    session_ids = [uuid.uuid4().hex, uuid.uuid4().hex]
+    timestamp = "2024-07-03 09:00:00"
+    for session_id in session_ids:
+        _create_session(
+            {
+                "id": session_id,
+                "name": f"Bulk {session_id[:6]}",
+                "plan_id": None,
+                "plan_title": None,
+                "current_task_id": None,
+                "current_task_name": None,
+                "last_message_at": timestamp,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+                "message_role": "assistant",
+                "message_content": "bulk",
+                "is_active": 1,
+            }
+        )
+
+    missing_id = uuid.uuid4().hex
+    resp = chat_client.post(
+        "/chat/sessions/bulk/delete",
+        json={"session_ids": [session_ids[0], missing_id, session_ids[1]]},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["deleted"] == [session_ids[0], session_ids[1]]
+    assert payload["missing"] == [missing_id]
+    assert payload["archived"] == []
+
+    with get_db() as conn:
+        remaining = conn.execute(
+            "SELECT COUNT(1) AS cnt FROM chat_sessions WHERE id IN (?, ?)",
+            session_ids,
+        ).fetchone()
+
+    assert remaining["cnt"] == 0
+
+
+def test_bulk_archive_sessions(chat_client: TestClient):
+    _clear_chat_tables()
+
+    session_id = uuid.uuid4().hex
+    timestamp = "2024-07-04 09:00:00"
+    _create_session(
+        {
+            "id": session_id,
+            "name": "Bulk Archive",
+            "plan_id": None,
+            "plan_title": None,
+            "current_task_id": None,
+            "current_task_name": None,
+            "last_message_at": timestamp,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "message_role": "assistant",
+            "message_content": "bulk",
+            "is_active": 1,
+        }
+    )
+
+    resp = chat_client.post(
+        "/chat/sessions/bulk/delete",
+        json={"session_ids": [session_id], "archive": True},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["archived"] == [session_id]
+    assert payload["deleted"] == []
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM chat_sessions WHERE id=?", (session_id,)
+        ).fetchone()
+
+    assert row["is_active"] == 0
+
+
 def test_delete_session_not_found(chat_client: TestClient):
     _clear_chat_tables()
 
@@ -331,6 +441,81 @@ def test_patch_session_settings_rejects_invalid_provider(chat_client: TestClient
         json={"settings": {"default_search_provider": "bing"}},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("format", "expected_type"),
+    [
+        ("json", "application/json"),
+        ("md", "text/markdown"),
+        ("txt", "text/plain"),
+    ],
+)
+def test_export_session_formats(
+    chat_client: TestClient, format: str, expected_type: str
+):
+    _clear_chat_tables()
+
+    session_id = uuid.uuid4().hex
+    timestamp_1 = "2024-10-01 09:00:00"
+    timestamp_2 = "2024-10-01 09:01:00"
+    _create_session(
+        {
+            "id": session_id,
+            "name": "Export Session",
+            "plan_id": None,
+            "plan_title": None,
+            "current_task_id": None,
+            "current_task_name": None,
+            "last_message_at": timestamp_1,
+            "created_at": timestamp_1,
+            "updated_at": timestamp_1,
+            "message_role": "user",
+            "message_content": "Hello",
+            "message_metadata": {
+                "note": "alpha",
+                "tool_results": [{"name": "tool-a"}],
+            },
+            "is_active": 1,
+        }
+    )
+    _insert_message(
+        session_id,
+        "assistant",
+        "World",
+        timestamp_2,
+        {"note": "beta", "tool_results": [{"name": "tool-b"}]},
+    )
+
+    resp = chat_client.get(
+        f"/chat/sessions/{session_id}/export?format={format}"
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith(expected_type)
+
+    disposition = resp.headers.get("content-disposition")
+    assert disposition is not None
+    assert re.search(
+        rf"conversation_Export_Session_\d{{8}}_\d{{4}}\.{format}",
+        disposition,
+    )
+
+    if format == "json":
+        payload = resp.json()
+        assert payload["session_id"] == session_id
+        assert payload["title"] == "Export Session"
+        assert len(payload["messages"]) == 2
+        assert payload["messages"][0]["content"] == "Hello"
+        assert payload["messages"][0]["tool_results"] == [{"name": "tool-a"}]
+        assert payload["messages"][1]["content"] == "World"
+        assert payload["messages"][1]["tool_results"] == [{"name": "tool-b"}]
+    else:
+        body = resp.text
+        assert "Hello" in body
+        assert "World" in body
+        assert "tool_results" in body
+        assert '"note": "alpha"' in body
+        assert body.index("Hello") < body.index("World")
 
 
 def test_chat_status_endpoint(chat_client: TestClient):

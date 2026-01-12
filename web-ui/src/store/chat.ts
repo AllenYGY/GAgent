@@ -122,6 +122,7 @@ const derivePlanContextFromMessages = (
 };
 
 const pendingAutotitleSessions = new Set<string>();
+const pendingProviderSyncSessions = new Set<string>();
 const autoTitleHistory = new Map<string, { planId: number | null }>();
 
 interface ChatState {
@@ -157,6 +158,12 @@ interface ChatState {
   addSession: (session: ChatSession) => void;
   removeSession: (sessionId: string) => void;
   deleteSession: (sessionId: string, options?: { archive?: boolean }) => Promise<void>;
+  bulkDeleteSessions: (
+    sessionIds: string[],
+    options?: { archive?: boolean }
+  ) => Promise<{ deleted: string[]; archived: string[]; missing: string[] }>;
+  setSessionActive: (sessionId: string, isActive: boolean) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   addMessage: (message: ChatMessage) => void;
   updateMessage: (messageId: string, updates: Partial<ChatMessage>) => void;
   removeMessage: (messageId: string) => void;
@@ -321,6 +328,7 @@ export const useChatStore = create<ChatState>()(
         return;
       }
 
+      pendingProviderSyncSessions.delete(sessionId);
       const wasCurrent = get().currentSession?.id === sessionId;
       get().removeSession(sessionId);
 
@@ -363,6 +371,249 @@ export const useChatStore = create<ChatState>()(
         },
         { source: 'chat.session' }
       );
+    },
+
+    bulkDeleteSessions: async (sessionIds, options) => {
+      const archive = options?.archive ?? false;
+      const normalizedIds = Array.from(
+        new Set(sessionIds.map((id) => id.trim()).filter((id) => id))
+      );
+      if (normalizedIds.length === 0) {
+        return { deleted: [], archived: [], missing: [] };
+      }
+
+      let response: { deleted: string[]; archived: string[]; missing: string[] };
+      try {
+        response = await chatApi.bulkDeleteSessions({
+          session_ids: normalizedIds,
+          archive,
+        });
+      } catch (error) {
+        console.error('Failed to bulk delete sessions:', error);
+        throw error;
+      }
+
+      const deletedIds = response.deleted ?? [];
+      const archivedIds = response.archived ?? [];
+      const deletedSet = new Set(deletedIds);
+      const archivedSet = new Set(archivedIds);
+
+      for (const id of deletedIds) {
+        autoTitleHistory.delete(id);
+        pendingAutotitleSessions.delete(id);
+        pendingProviderSyncSessions.delete(id);
+      }
+
+      const stateSnapshot = get();
+      const currentSessionKey =
+        stateSnapshot.currentSession?.session_id ??
+        stateSnapshot.currentSession?.id ??
+        null;
+      const currentWasDeleted =
+        currentSessionKey !== null && deletedSet.has(currentSessionKey);
+      const currentWasArchived =
+        currentSessionKey !== null && archivedSet.has(currentSessionKey);
+
+      set((state) => {
+        const filteredSessions = state.sessions.filter((session) => {
+          const sessionKey = session.session_id ?? session.id;
+          return !deletedSet.has(sessionKey);
+        });
+        const updatedSessions = filteredSessions.map((session) => {
+          const sessionKey = session.session_id ?? session.id;
+          if (archivedSet.has(sessionKey)) {
+            return { ...session, is_active: false };
+          }
+          return session;
+        });
+
+        SessionStorage.setAllSessionIds(updatedSessions.map((s) => s.id));
+        if (currentWasDeleted) {
+          SessionStorage.clearCurrentSessionId();
+        }
+
+        let nextCurrent = state.currentSession;
+        if (currentWasDeleted) {
+          nextCurrent = null;
+        } else if (currentWasArchived && state.currentSession) {
+          nextCurrent = { ...state.currentSession, is_active: false };
+        } else if (state.currentSession) {
+          const updated = updatedSessions.find((session) => {
+            const sessionKey = session.session_id ?? session.id;
+            return sessionKey === currentSessionKey;
+          });
+          nextCurrent = updated ?? state.currentSession;
+        }
+
+        return {
+          sessions: updatedSessions,
+          currentSession: nextCurrent,
+          messages: currentWasDeleted ? [] : state.messages,
+          defaultSearchProvider: currentWasDeleted
+            ? null
+            : state.defaultSearchProvider,
+        };
+      });
+
+      if (archive) {
+        for (const id of archivedIds) {
+          dispatchPlanSyncEvent(
+            {
+              type: 'session_archived',
+              session_id: id,
+              plan_id: null,
+            },
+            { source: 'chat.session' }
+          );
+        }
+        return response;
+      }
+
+      for (const id of deletedIds) {
+        dispatchPlanSyncEvent(
+          {
+            type: 'session_deleted',
+            session_id: id,
+            plan_id: null,
+          },
+          { source: 'chat.session' }
+        );
+      }
+
+      if (currentWasDeleted) {
+        const tasksStore = useTasksStore.getState();
+        tasksStore.setTasks([]);
+        tasksStore.clearTaskResultCache();
+        tasksStore.closeTaskDrawer();
+
+        const remainingSessions = get().sessions;
+        const fallbackSession =
+          remainingSessions.find((session) => session.is_active) ??
+          remainingSessions[0] ??
+          null;
+
+        if (fallbackSession) {
+          get().setCurrentSession(fallbackSession);
+          try {
+            await get().loadChatHistory(fallbackSession.id);
+          } catch (historyError) {
+            console.warn('Failed to load fallback session history:', historyError);
+          }
+        } else {
+          set({
+            currentPlanId: null,
+            currentPlanTitle: null,
+            currentTaskId: null,
+            currentTaskName: null,
+            currentWorkflowId: null,
+            messages: [],
+          });
+        }
+      }
+
+      return response;
+    },
+
+    setSessionActive: async (sessionId, isActive) => {
+      const sessionKey = sessionId?.trim();
+      if (!sessionKey) {
+        throw new Error('Missing session id.');
+      }
+
+      const updatedSummary = await chatApi.updateSession(sessionKey, {
+        is_active: isActive,
+      });
+      const normalized = summaryToChatSession(updatedSummary);
+
+      set((state) => {
+        const applyUpdate = (session: ChatSession): ChatSession => {
+          const matchId = session.session_id ?? session.id;
+          if (matchId !== sessionKey) {
+            return session;
+          }
+          return {
+            ...session,
+            title: normalized.title,
+            titleSource: normalized.titleSource ?? session.titleSource ?? null,
+            isUserNamed: normalized.isUserNamed ?? session.isUserNamed ?? null,
+            plan_id: normalized.plan_id ?? session.plan_id ?? null,
+            plan_title: normalized.plan_title ?? session.plan_title ?? null,
+            current_task_id:
+              normalized.current_task_id ?? session.current_task_id ?? null,
+            current_task_name:
+              normalized.current_task_name ?? session.current_task_name ?? null,
+            last_message_at:
+              normalized.last_message_at ?? session.last_message_at ?? null,
+            updated_at: normalized.updated_at ?? session.updated_at,
+            is_active:
+              normalized.is_active === undefined
+                ? session.is_active
+                : normalized.is_active,
+            defaultSearchProvider:
+              normalized.defaultSearchProvider ?? session.defaultSearchProvider ?? null,
+          };
+        };
+
+        return {
+          currentSession: state.currentSession
+            ? applyUpdate(state.currentSession)
+            : state.currentSession,
+          sessions: state.sessions.map(applyUpdate),
+        };
+      });
+    },
+
+    renameSession: async (sessionId, title) => {
+      const sessionKey = sessionId?.trim();
+      if (!sessionKey) {
+        throw new Error('Missing session id.');
+      }
+      const nextTitle = (title ?? '').trim();
+      if (!nextTitle) {
+        throw new Error('Title cannot be empty.');
+      }
+
+      const updatedSummary = await chatApi.updateSession(sessionKey, {
+        name: nextTitle,
+      });
+      const normalized = summaryToChatSession(updatedSummary);
+
+      set((state) => {
+        const applyUpdate = (session: ChatSession): ChatSession => {
+          const matchId = session.session_id ?? session.id;
+          if (matchId !== sessionKey) {
+            return session;
+          }
+          return {
+            ...session,
+            title: normalized.title,
+            titleSource: normalized.titleSource ?? session.titleSource ?? null,
+            isUserNamed: normalized.isUserNamed ?? true,
+            plan_id: normalized.plan_id ?? session.plan_id ?? null,
+            plan_title: normalized.plan_title ?? session.plan_title ?? null,
+            current_task_id:
+              normalized.current_task_id ?? session.current_task_id ?? null,
+            current_task_name:
+              normalized.current_task_name ?? session.current_task_name ?? null,
+            last_message_at:
+              normalized.last_message_at ?? session.last_message_at ?? null,
+            updated_at: normalized.updated_at ?? session.updated_at,
+            is_active:
+              normalized.is_active === undefined
+                ? session.is_active
+                : normalized.is_active,
+            defaultSearchProvider:
+              normalized.defaultSearchProvider ?? session.defaultSearchProvider ?? null,
+          };
+        };
+
+        return {
+          currentSession: state.currentSession
+            ? applyUpdate(state.currentSession)
+            : state.currentSession,
+          sessions: state.sessions.map(applyUpdate),
+        };
+      });
     },
 
     // Add message
@@ -777,12 +1028,31 @@ export const useChatStore = create<ChatState>()(
           const newSessionId = assistantMetadata.session_id as string;
           const current = state.currentSession
             ? { ...state.currentSession, session_id: newSessionId }
-            : null;
+          : null;
           const sessions = state.sessions.map((s) =>
             s.id === current?.id ? { ...s, session_id: newSessionId } : s
           );
           set({ currentSession: current, sessions });
           SessionStorage.setCurrentSessionId(newSessionId);
+        }
+
+        const providerSessionKey =
+          get().currentSession?.session_id ?? get().currentSession?.id ?? null;
+        if (
+          providerToUse &&
+          providerSessionKey &&
+          pendingProviderSyncSessions.has(providerSessionKey)
+        ) {
+          void (async () => {
+            try {
+              await chatApi.updateSession(providerSessionKey, {
+                settings: { default_search_provider: providerToUse },
+              });
+              pendingProviderSyncSessions.delete(providerSessionKey);
+            } catch (error) {
+              console.warn('Failed to sync default search provider:', error);
+            }
+          })();
         }
 
         const trackingId =
@@ -1061,6 +1331,9 @@ export const useChatStore = create<ChatState>()(
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const providerPreference = get().defaultSearchProvider ?? null;
       autoTitleHistory.delete(sessionId);
+      if (providerPreference) {
+        pendingProviderSyncSessions.add(sessionId);
+      }
       const session: ChatSession = {
         id: sessionId,
         title: title || `Conversation ${new Date().toLocaleString()}`,
@@ -1108,6 +1381,9 @@ export const useChatStore = create<ChatState>()(
       if (!session) {
         const providerPreference = get().defaultSearchProvider ?? null;
         autoTitleHistory.delete(sessionId);
+        if (providerPreference) {
+          pendingProviderSyncSessions.add(sessionId);
+        }
         session = {
           id: sessionId,
           title: title || `Conversation ${new Date().toLocaleString()}`,
@@ -1294,8 +1570,14 @@ export const useChatStore = create<ChatState>()(
         await chatApi.updateSession(sessionKey, {
           settings: { default_search_provider: normalized },
         });
+        pendingProviderSyncSessions.delete(sessionKey);
       } catch (error) {
         console.error('Failed to update default search provider:', error);
+        if (currentSession?.titleSource === 'local' && sessionKey) {
+          pendingProviderSyncSessions.add(sessionKey);
+          set({ isUpdatingProvider: false });
+          return;
+        }
         set((state) => ({
           defaultSearchProvider: prevProvider,
           isUpdatingProvider: false,

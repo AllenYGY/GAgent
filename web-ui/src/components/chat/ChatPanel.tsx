@@ -434,7 +434,7 @@ const ChatPanel: React.FC = () => {
               options={providerOptions}
               allowClear
               onChange={handleProviderChange}
-              disabled={!currentSession || isProcessing}
+              disabled={isProcessing}
               loading={isUpdatingProvider}
               style={{ width: '100%' }}
             />

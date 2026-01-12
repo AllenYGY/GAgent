@@ -53,37 +53,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     }
   }, [selectedTaskId]);
 
-  // Status icon
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return '✅';
-      case 'running':
-        return '⚡';
-      case 'pending':
-        return '⏳';
-      case 'failed':
-        return '❌';
-      default:
-        return '⭕';
-    }
-  };
-
-  // Task-type icon
-  const getTypeIcon = (taskType?: string) => {
-    if (!taskType) return '📄';
-    switch (taskType.toLowerCase()) {
-      case 'root':
-        return '⭐';
-      case 'composite':
-        return '📦';
-      case 'atomic':
-        return '⚙️';
-      default:
-        return '📄';
-    }
-  };
-
   // Status colour
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -182,8 +151,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
             placement="right"
           >
             <span className="plan-tree-node-info">
-              <span className="plan-node-type-icon">{getTypeIcon(task.task_type)}</span>
-              <span className="plan-node-status-icon">{getStatusIcon(task.status)}</span>
               <span 
                 className="plan-node-name"
                 style={{ 
@@ -232,7 +199,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
         color: '#999',
         fontSize: '12px'
       }}>
-        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🌳</div>
         <div>No tasks yet</div>
       </div>
     );
