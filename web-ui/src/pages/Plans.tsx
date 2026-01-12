@@ -16,6 +16,7 @@ import {
   Spin,
   Switch,
   Statistic,
+  Alert,
 } from 'antd';
 import { ReloadOutlined, ApartmentOutlined } from '@ant-design/icons';
 import { usePlanSummaries, usePlanTasks, usePlanExecutionSummary, usePlanResults } from '@hooks/usePlans';
@@ -27,14 +28,12 @@ import { isPlanSyncEventDetail } from '@utils/planSyncEvents';
 const { Title, Text, Paragraph } = Typography;
 
 const PlansPage: React.FC = () => {
-  const { currentWorkflowId, currentSession, currentPlanId, setChatContext } = useChatStore((state) => ({
-    currentWorkflowId: state.currentWorkflowId,
+  const { currentSession, currentPlanId, setChatContext, pendingPlanCreation } = useChatStore((state) => ({
     currentSession: state.currentSession,
     currentPlanId: state.currentPlanId,
     setChatContext: state.setChatContext,
+    pendingPlanCreation: state.pendingPlanCreation,
   }));
-
-  const sessionIdentifier = currentSession?.session_id ?? undefined;
 
   const {
     data: planSummaries = [],
@@ -80,6 +79,16 @@ const PlansPage: React.FC = () => {
   });
 
   const planResults: PlanResultItem[] = planResultsResponse?.items ?? [];
+  const planCreationPending = useMemo(() => {
+    if (!pendingPlanCreation) {
+      return null;
+    }
+    const sessionId = currentSession?.session_id ?? currentSession?.id ?? null;
+    if (!pendingPlanCreation.sessionId || pendingPlanCreation.sessionId === sessionId) {
+      return pendingPlanCreation;
+    }
+    return null;
+  }, [currentSession, pendingPlanCreation]);
 
   // Aggregate plan/task statistics
   const planStats = useMemo(() => {
@@ -361,6 +370,18 @@ const PlansPage: React.FC = () => {
       <div className="content-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Card>
           <Space direction="vertical" style={{ width: '100%' }} size="large">
+            {planCreationPending && (
+              <Alert
+                message="Plan creation in progress"
+                description={
+                  planCreationPending.title
+                    ? `Creating "${planCreationPending.title}" in the background. Tasks will appear shortly.`
+                    : 'Creating the plan in the background. Tasks will appear shortly.'
+                }
+                type="info"
+                showIcon
+              />
+            )}
             <Space wrap>
               <Text strong>Select plan:</Text>
               <Select

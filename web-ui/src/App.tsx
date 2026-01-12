@@ -13,11 +13,13 @@ import Plans from '@pages/Plans';
 import Memory from '@pages/Memory';
 import System from '@pages/System';
 import { ENV } from '@/config/env';
+import { usePlanCreationMonitor } from '@hooks/usePlanCreationMonitor';
 
 function App() {
   const { message } = AntdApp.useApp();
   const { setSystemStatus, setApiConnected, refreshApiCallRate } = useSystemStore();
   const [siderCollapsed, setSiderCollapsed] = useState(false);
+  usePlanCreationMonitor();
 
   // Initialize system status checks
   useEffect(() => {

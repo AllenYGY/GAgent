@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Spin, Tooltip, Button, Space, message } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import { Spin, Tooltip } from 'antd';
 import { PlanTaskNode } from '@/types';
-import { exportPlanAsJson } from '@utils/exportPlan';
 import './PlanTreeVisualization.css';
 
 export interface PlanTreeVisualizationProps {
@@ -37,12 +35,9 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
   height = '480px',
   onSelectTask,
   selectedTaskId,
-  planId,
-  planTitle,
 }) => {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [internalSelectedId, setInternalSelectedId] = useState<number | null>(null);
-  const [exporting, setExporting] = useState(false);
 
   const effectiveSelectedId =
     selectedTaskId !== undefined ? selectedTaskId ?? null : internalSelectedId;
@@ -109,7 +104,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
     const isSelected = effectiveSelectedId === task.id;
     
     const cleanName = (task.short_name || task.name || '').replace(/^(ROOT|COMPOSITE|ATOMIC):\s*/i, '');
-    const displayName = cleanName.length > 30 ? cleanName.substring(0, 30) + '...' : cleanName;
     
     const connector = isRoot ? '' : (isLast ? '└── ' : '├── ');
     const childPrefix = isRoot ? '' : (isLast ? '    ' : '│   ');
@@ -122,7 +116,6 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
           data-depth={depth}
         >
           <span className="plan-tree-connector">{prefix}{connector}</span>
-          
           {hasChildren && (
             <span 
               className="plan-tree-collapse-btn"
@@ -137,7 +130,7 @@ const PlanTreeVisualization: React.FC<PlanTreeVisualizationProps> = ({
             placement="right"
           >
             <span className="plan-tree-node-info">
-              <span className="plan-node-name">{displayName}</span>
+              <span className="plan-node-name">{cleanName}</span>
             </span>
           </Tooltip>
         </div>

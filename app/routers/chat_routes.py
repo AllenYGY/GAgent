@@ -2412,10 +2412,7 @@ class StructuredChatAgent:
     ) -> Optional[str]:
         if value is None:
             return None
-        text = str(value)
-        if len(text) > limit:
-            return text[: limit - 3] + "..."
-        return text
+        return str(value)
 
     def _build_actions_summary(self, steps: List[AgentStep]) -> List[Dict[str, Any]]:
         summary: List[Dict[str, Any]] = []

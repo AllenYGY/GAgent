@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Typography, Button, Space, Tooltip, Empty, message } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Typography, Button, Space, Tooltip, Empty, message, Alert } from 'antd';
 import {
   NodeIndexOutlined,
   ReloadOutlined,
@@ -25,14 +25,25 @@ const DAGSidebar: React.FC = () => {
     closeTaskDrawer: state.closeTaskDrawer,
     selectedTaskId: state.selectedTaskId,
   }));
-  const { setChatContext, currentWorkflowId, currentSession, currentPlanId, currentPlanTitle } =
+  const { setChatContext, currentWorkflowId, currentSession, currentPlanId, currentPlanTitle, pendingPlanCreation } =
     useChatStore((state) => ({
       setChatContext: state.setChatContext,
       currentWorkflowId: state.currentWorkflowId,
       currentSession: state.currentSession,
       currentPlanId: state.currentPlanId,
       currentPlanTitle: state.currentPlanTitle,
+      pendingPlanCreation: state.pendingPlanCreation,
     }));
+  const planCreationPending = useMemo(() => {
+    if (!pendingPlanCreation) {
+      return null;
+    }
+    const sessionId = currentSession?.session_id ?? currentSession?.id ?? null;
+    if (!pendingPlanCreation.sessionId || pendingPlanCreation.sessionId === sessionId) {
+      return pendingPlanCreation;
+    }
+    return null;
+  }, [currentSession, pendingPlanCreation]);
   const [dagVisible, setDagVisible] = useState(true);
   const [rootTaskId, setRootTaskId] = useState<number | null>(null);
   const [selectedPlanTitle, setSelectedPlanTitle] = useState<string | undefined>(
@@ -165,6 +176,18 @@ const DAGSidebar: React.FC = () => {
           </Space>
         </div>
 
+        {planCreationPending && (
+          <Alert
+            message="Plan creation in progress"
+            description={
+              planCreationPending.title
+                ? `Creating "${planCreationPending.title}" in the background. Tasks will appear shortly.`
+                : 'Creating the plan in the background. Tasks will appear shortly.'
+            }
+            type="info"
+            showIcon
+          />
+        )}
       </div>
 
       {dagVisible && (

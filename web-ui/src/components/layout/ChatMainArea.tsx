@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import {
   App as AntdApp,
   Input,
@@ -52,9 +52,21 @@ const ChatMainArea: React.FC = () => {
     defaultSearchProvider,
     setDefaultSearchProvider,
     isUpdatingProvider,
+    pendingPlanCreation,
   } = useChatStore();
 
   const { selectedTask, currentPlan } = useTasksStore();
+  const planCreationPending = useMemo(() => {
+    if (!pendingPlanCreation) {
+      return null;
+    }
+    const sessionId =
+      currentSession?.session_id ?? currentSession?.id ?? null;
+    if (!pendingPlanCreation.sessionId || pendingPlanCreation.sessionId === sessionId) {
+      return pendingPlanCreation;
+    }
+    return null;
+  }, [currentSession, pendingPlanCreation]);
 
   // Auto-scroll to the latest message
   useEffect(() => {
@@ -281,6 +293,20 @@ const ChatMainArea: React.FC = () => {
                 closable
                 style={{ marginBottom: 16 }}
                 onClose={() => useChatStore.getState().setRelevantMemories([])}
+              />
+            )}
+
+            {planCreationPending && (
+              <Alert
+                message="Plan creation in progress"
+                description={
+                  planCreationPending.title
+                    ? `Creating "${planCreationPending.title}" in the background. Tasks will appear shortly.`
+                    : 'Creating the plan in the background. Tasks will appear shortly.'
+                }
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
               />
             )}
 

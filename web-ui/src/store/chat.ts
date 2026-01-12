@@ -27,6 +27,11 @@ import {
   mergeToolResults,
 } from '@utils/toolResults';
 import {
+  extractDecompositionJob,
+  getPlanCreationTitle,
+  hasPlanCreationAction,
+} from '@utils/planCreation';
+import {
   coercePlanId,
   coercePlanTitle,
   derivePlanSyncEventsFromActions,
@@ -125,6 +130,17 @@ const pendingAutotitleSessions = new Set<string>();
 const pendingProviderSyncSessions = new Set<string>();
 const autoTitleHistory = new Map<string, { planId: number | null }>();
 
+interface PendingPlanCreationState {
+  trackingId: string | null;
+  sessionId: string | null;
+  title: string | null;
+  planId: number | null;
+  jobId: string | null;
+  jobStatus: string | null;
+  jobType: string | null;
+  startedAt: string;
+}
+
 interface ChatState {
   // Chat data
   currentSession: ChatSession | null;
@@ -152,6 +168,7 @@ interface ChatState {
   // Memory related state
   memoryEnabled: boolean;
   relevantMemories: Memory[];
+  pendingPlanCreation: PendingPlanCreationState | null;
 
   // Actions
   setCurrentSession: (session: ChatSession | null) => void;
@@ -189,6 +206,8 @@ interface ChatState {
   setMemoryEnabled: (enabled: boolean) => void;
   setRelevantMemories: (memories: Memory[]) => void;
   saveMessageAsMemory: (message: ChatMessage, memoryType?: string, importance?: string) => Promise<void>;
+  setPendingPlanCreation: (pending: PendingPlanCreationState | null) => void;
+  updatePendingPlanCreation: (updates: Partial<PendingPlanCreationState>) => void;
 
   loadSessions: () => Promise<void>;
   autotitleSession: (
@@ -225,6 +244,7 @@ export const useChatStore = create<ChatState>()(
     chatPanelWidth: 400,
     memoryEnabled: true, // Enable memory by default
     relevantMemories: [],
+    pendingPlanCreation: null,
 
     // Set current session
     setCurrentSession: (session) => {
@@ -274,6 +294,8 @@ export const useChatStore = create<ChatState>()(
       pendingAutotitleSessions.delete(sessionId);
       set((state) => {
         const newSessions = state.sessions.filter(s => s.id !== sessionId);
+        const shouldClearPending =
+          state.pendingPlanCreation?.sessionId === sessionId;
         // Update localStorage
         const allSessionIds = newSessions.map(s => s.id);
         SessionStorage.setAllSessionIds(allSessionIds);
@@ -287,6 +309,7 @@ export const useChatStore = create<ChatState>()(
           messages: state.currentSession?.id === sessionId ? [] : state.messages,
           defaultSearchProvider:
             state.currentSession?.id === sessionId ? null : state.defaultSearchProvider,
+          pendingPlanCreation: shouldClearPending ? null : state.pendingPlanCreation,
         };
       });
     },
@@ -871,7 +894,12 @@ export const useChatStore = create<ChatState>()(
           chatRequest
         );
         const stateSnapshot = get();
-        const actions = (result.actions ?? []) as ChatActionSummary[];
+        const rawActions = Array.isArray(result.metadata?.raw_actions)
+          ? (result.metadata?.raw_actions as ChatActionSummary[])
+          : [];
+        const actions = ((result.actions && result.actions.length > 0)
+          ? result.actions
+          : rawActions) as ChatActionSummary[];
 
         const metadataHasPlanId = (
           result.metadata && Object.prototype.hasOwnProperty.call(result.metadata, 'plan_id')
@@ -1034,6 +1062,13 @@ export const useChatStore = create<ChatState>()(
           );
           set({ currentSession: current, sessions });
           SessionStorage.setCurrentSessionId(newSessionId);
+          const pendingCreation = state.pendingPlanCreation;
+          if (
+            pendingCreation &&
+            (pendingCreation.sessionId === current?.id || pendingCreation.sessionId === null)
+          ) {
+            get().updatePendingPlanCreation({ sessionId: newSessionId });
+          }
         }
 
         const providerSessionKey =
@@ -1060,8 +1095,50 @@ export const useChatStore = create<ChatState>()(
             ? assistantMetadata.tracking_id
             : undefined;
 
+        if (actions.length > 0 && hasPlanCreationAction(actions)) {
+          const sessionKey =
+            get().currentSession?.session_id ??
+            get().currentSession?.id ??
+            stateSnapshot.currentSession?.session_id ??
+            stateSnapshot.currentSession?.id ??
+            null;
+          const pendingTitle = getPlanCreationTitle(actions, resolvedPlanTitle ?? null);
+          if (trackingId) {
+            get().setPendingPlanCreation({
+              trackingId,
+              sessionId: sessionKey,
+              title: pendingTitle,
+              planId: resolvedPlanId ?? null,
+              jobId: trackingId,
+              jobStatus:
+                typeof assistantMetadata.job_status === 'string'
+                  ? assistantMetadata.job_status
+                  : 'queued',
+              jobType:
+                typeof assistantMetadata.job_type === 'string'
+                  ? assistantMetadata.job_type
+                  : 'chat_action',
+              startedAt: new Date().toISOString(),
+            });
+          } else {
+            const embeddedJob = extractDecompositionJob(actions as Array<Record<string, any>>);
+            if (embeddedJob) {
+              get().setPendingPlanCreation({
+                trackingId: null,
+                sessionId: sessionKey,
+                title: pendingTitle,
+                planId: embeddedJob.planId ?? resolvedPlanId ?? null,
+                jobId: embeddedJob.jobId,
+                jobStatus: embeddedJob.status ?? 'queued',
+                jobType: embeddedJob.jobType ?? 'plan_decompose',
+                startedAt: new Date().toISOString(),
+              });
+            }
+          }
+        }
+
         if (!trackingId) {
-          const planEvents = derivePlanSyncEventsFromActions(result.actions, {
+          const planEvents = derivePlanSyncEventsFromActions(actions, {
             fallbackPlanId: resolvedPlanId ?? stateSnapshot.currentPlanId ?? null,
             fallbackPlanTitle: resolvedPlanTitle ?? stateSnapshot.currentPlanTitle ?? null,
           });
@@ -1188,6 +1265,48 @@ export const useChatStore = create<ChatState>()(
               coercePlanTitle(status.result?.plan_title) ??
               resolvedPlanTitle ??
               null;
+
+            const pendingCreation = get().pendingPlanCreation;
+            if (!pendingCreation && hasPlanCreationAction(finalActions)) {
+              const embeddedJob = extractDecompositionJob(stepList);
+              if (embeddedJob) {
+                const sessionKey =
+                  get().currentSession?.session_id ??
+                  get().currentSession?.id ??
+                  stateSnapshot.currentSession?.session_id ??
+                  stateSnapshot.currentSession?.id ??
+                  null;
+                get().setPendingPlanCreation({
+                  trackingId,
+                  sessionId: sessionKey,
+                  title: finalPlanTitle ?? null,
+                  planId: embeddedJob.planId ?? finalPlanIdCandidate ?? null,
+                  jobId: embeddedJob.jobId,
+                  jobStatus: embeddedJob.status ?? 'queued',
+                  jobType: embeddedJob.jobType ?? 'plan_decompose',
+                  startedAt: new Date().toISOString(),
+                });
+              }
+            } else if (pendingCreation && pendingCreation.trackingId === trackingId) {
+              if (status.status === 'failed') {
+                get().setPendingPlanCreation(null);
+              } else if (!hasPlanCreationAction(finalActions)) {
+                get().setPendingPlanCreation(null);
+              } else {
+                const embeddedJob = extractDecompositionJob(stepList);
+                if (embeddedJob) {
+                  get().updatePendingPlanCreation({
+                    title: finalPlanTitle ?? pendingCreation.title,
+                    planId: embeddedJob.planId ?? finalPlanIdCandidate ?? pendingCreation.planId,
+                    jobId: embeddedJob.jobId,
+                    jobStatus: embeddedJob.status ?? pendingCreation.jobStatus,
+                    jobType: embeddedJob.jobType ?? pendingCreation.jobType,
+                  });
+                } else {
+                  get().setPendingPlanCreation(null);
+                }
+              }
+            }
 
             const finalErrors = status.errors ?? [];
             const updatedMetadata: ChatResponseMetadata = {
@@ -1510,6 +1629,21 @@ export const useChatStore = create<ChatState>()(
     setMemoryEnabled: (enabled) => set({ memoryEnabled: enabled }),
 
     setRelevantMemories: (memories) => set({ relevantMemories: memories }),
+
+    setPendingPlanCreation: (pending) => set({ pendingPlanCreation: pending }),
+
+    updatePendingPlanCreation: (updates) =>
+      set((state) => {
+        if (!state.pendingPlanCreation) {
+          return state;
+        }
+        return {
+          pendingPlanCreation: {
+            ...state.pendingPlanCreation,
+            ...updates,
+          },
+        };
+      }),
 
     saveMessageAsMemory: async (message, memoryType = 'conversation', importance = 'medium') => {
       try {

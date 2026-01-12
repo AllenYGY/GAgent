@@ -432,28 +432,6 @@ const ChatSidebar: React.FC = () => {
     return items;
   };
 
-  // Format timestamps for listing
-  const formatTime = (date?: Date | null) => {
-    if (!date) {
-      return '';
-    }
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-    if (days === 0) {
-      return date.toLocaleTimeString(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } else if (days === 1) {
-      return 'Yesterday';
-    } else if (days < 7) {
-      return `${days} days ago`;
-    }
-    return date.toLocaleDateString();
-  };
-
   return (
     <div style={{ 
       height: '100%', 
@@ -554,8 +532,6 @@ const ChatSidebar: React.FC = () => {
           style={{ height: '100%', overflow: 'auto' }}
           dataSource={filteredSessions}
           renderItem={(session) => {
-            const lastTimestamp =
-              session.last_message_at ?? session.updated_at ?? session.created_at;
             const sessionKey = session.session_id ?? session.id;
             const isSelected = selectedSessionIds.includes(sessionKey);
             const titleHint = session.isUserNamed
@@ -632,7 +608,7 @@ const ChatSidebar: React.FC = () => {
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       marginBottom: 4,
                       gap: 8,
                     }}
@@ -640,20 +616,17 @@ const ChatSidebar: React.FC = () => {
                     <Tooltip title={titleHint} placement="topLeft">
                       <Text
                         strong={currentSession?.id === session.id}
-                        ellipsis
                         style={{
                           fontSize: 14,
                           color: currentSession?.id === session.id ? '#1976d2' : '#333',
                           flex: 1,
+                          whiteSpace: 'normal',
+                          wordBreak: 'break-word',
                         }}
                       >
                         {session.title || `Session ${session.id.slice(-8)}`}
                       </Text>
                     </Tooltip>
-                    
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {formatTime(lastTimestamp)}
-                    </Text>
 
                     <Dropdown
                       menu={{
@@ -690,8 +663,13 @@ const ChatSidebar: React.FC = () => {
                   >
                     <Text
                       type="secondary"
-                      ellipsis
-                      style={{ fontSize: 12, color: '#6b7280', flex: 1 }}
+                      style={{
+                        fontSize: 12,
+                        color: '#6b7280',
+                        flex: 1,
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                      }}
                     >
                       {session.plan_title || 'No plan linked'}
                     </Text>
