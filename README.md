@@ -1,12 +1,29 @@
 # 使用指南
 
 本指南面向日常使用，覆盖启动、对话、计划、任务图与常见问题。
+本项目主要面向有一定技术背景的用户，假设读者具备基本的命令行操作与环境配置能力。
+主要使用流程包括启动后端与前端、创建与管理对话、使用计划与任务图功能等。
+研究者需要带有一个研究课题 在与Agent交互时, 初步创建完善完整的研究计划。目前暂不包括执行计划的功能。
+
+## 0) clone仓库
+
+```bash
+git clone https://github.com/AllenYGY/GAgent.git
+```
+
+把仓库 clone 到本地后，进入仓库根目录：
+
+```bash
+cd GAgent
+```
 
 ## 1) 快速启动
 
 后端：
 
 ```bash
+conda create -n agent python=3.13
+conda activate agent
 pip install -r requirements.txt
 ./start_backend.sh
 ```

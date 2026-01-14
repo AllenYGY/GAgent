@@ -7,8 +7,8 @@ This doc focuses on plan-generation ablations across planner type, tool access, 
 | Label | Planner | Tool Access | Script | Notes |
 | --- | --- | --- | --- | --- |
 | llm | LLM direct | none | `scripts/generate_llm_plans.py` | Pure JSON plan generation. |
-| agent | Agent (decomposer) | none | `scripts/direct_plan_generator.py` | Disable web_search via env. |
-| agent_web | Agent (decomposer) | web_search | `scripts/direct_plan_generator.py` | Enable web_search via env. |
+| agent | Agent (decomposer) | none | `scripts/decomposer_plan_generator.py` | Disable web_search via env. |
+| agent_web | Agent (decomposer) | web_search | `scripts/decomposer_plan_generator.py` | Enable web_search via env. |
 | agent_rag | Agent (chat) | graph_rag | `scripts/run_structured_agent.py` | Requires prompt to call graph_rag. |
 | agent_web_rag | Agent (chat) | web_search + graph_rag | `scripts/run_structured_agent.py` | Prompt must call tools before create_plan. |
 
@@ -51,22 +51,19 @@ python scripts/generate_llm_plans.py \
 
 ## Agent Plan
 
-### Tool toggle (direct decomposer)
+### Decomposer Without any Tools
 
 ```shell
 # Disable web_search for baseline agent runs
 export DECOMP_ENABLE_WEB_SEARCH=false
-
-# Enable web_search for agent_web runs (default is true)
-export DECOMP_ENABLE_WEB_SEARCH=true
 ```
 
-### Qwen deepseek-v3
+#### Qwen deepseek-v3
 
 ```shell
 export LLM_PROVIDER=qwen
 export QWEN_MODEL=deepseek-v3
-python scripts/direct_plan_generator.py \                         
+python scripts/decomposer_plan_generator.py \                         
     --input data/phage_plans.csv \
     --passes 2 \
     --expand-depth 2 \
@@ -75,10 +72,12 @@ python scripts/direct_plan_generator.py \
     --concurrency 10
 ```
 
-### Qwen qwen3-max
+#### Qwen qwen3-max
 
 ```shell
-python scripts/direct_plan_generator.py \
+export LLM_PROVIDER=qwen
+export QWEN_MODEL=qwen3-max
+python scripts/decomposer_plan_generator.py \
     --input data/phage_plans.csv \
     --passes 2 \
     --expand-depth 2 \
@@ -87,110 +86,44 @@ python scripts/direct_plan_generator.py \
     --concurrency 5
 ```
 
-## Agent Plan (Chat + Tool Ablations)
-
-Use this path when you need `graph_rag` (or strict tool control).
-
-When using `run_structured_agent.py`, capture the printed plan IDs and evaluate via
-`scripts/eval_plan_quality.py --plans <plan_id_list>`, or export plan trees from the repository.
-
-### Context flags (optional but recommended for isolation)
-
-Pass via `scripts/run_structured_agent.py --context` if you need to hard-disable tools:
-
-```json
-{
-  "allow_web_search": false,
-  "allow_graph_rag": true
-}
-```
-
-### Prompt templates
-
-Create small prompt templates and pass them with `--prompt-template`.
-
-```text
-# agent_base.txt
-Topic: "{title}"
-Goal: {goal}
-
-Create a detailed execution plan.
-Do NOT call any tool_operation.
-Call plan_operation.create_plan exactly once and confirm the plan_id.
-```
-
-```text
-# agent_web_search.txt
-Topic: "{title}"
-Goal: {goal}
-
-First call tool_operation.web_search with a focused query.
-Then call plan_operation.create_plan exactly once and confirm the plan_id.
-Do NOT call graph_rag.
-```
-
-```text
-# agent_graph_rag.txt
-Topic: "{title}"
-Goal: {goal}
-
-First call tool_operation.graph_rag with a focused query for domain facts.
-Then call plan_operation.create_plan exactly once and confirm the plan_id.
-Do NOT call web_search.
-```
-
-```text
-# agent_web_graph_rag.txt
-Topic: "{title}"
-Goal: {goal}
-
-Call tool_operation.graph_rag and tool_operation.web_search (in that order).
-Then call plan_operation.create_plan exactly once and confirm the plan_id.
-```
-
-### Example runs
+### Decomposer With Web Search
 
 ```shell
-# Single prompt (agent_rag)
-python scripts/run_structured_agent.py \
-  "Topic: phage host range. Goal: build a plan.
-First call tool_operation.graph_rag with a focused query.
-Then call plan_operation.create_plan exactly once and confirm the plan_id.
-Do NOT call web_search." \
-  --context '{"allow_web_search": false, "allow_graph_rag": true}' \
-  --session-id agent_rag_0001
+# Enable web_search for agent_web runs (default is true)
+export DECOMP_ENABLE_WEB_SEARCH=true
 ```
 
+#### Qwen deepseek-v3
+
 ```shell
-# Batch example (agent_rag) - loop over CSV titles
-python - <<'PY'
-import csv, subprocess, random
-with open("data/phage_plans.csv", newline="", encoding="utf-8") as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        title = (row.get("title") or row.get("goal") or "").strip()
-        if not title:
-            continue
-        prompt = (
-            f"Topic: {title}. Goal: {title}.\n"
-            "First call tool_operation.graph_rag with a focused query.\n"
-            "Then call plan_operation.create_plan exactly once and confirm the plan_id.\n"
-            "Do NOT call web_search."
-        )
-        subprocess.run(
-            [
-                "python",
-                "scripts/run_structured_agent.py",
-                prompt,
-                "--context",
-                '{"allow_web_search": false, "allow_graph_rag": true}',
-                "--session-id",
-                f"agent_rag_{random.randint(1000,9999)}",
-            ],
-            check=True,
-        )
-PY
+export LLM_PROVIDER=qwen
+export QWEN_MODEL=deepseek-v3
+python scripts/decomposer_plan_generator.py \
+    --input data/phage_plans.csv \
+    --passes 2 \
+    --expand-depth 2 \
+    --node-budget 10 \
+    --dump-dir results/agent_plans_phage_deepseek_web/plans \
+    --concurrency 5
 ```
+
+#### Qwen qwen3-max
+
+```shell
+export LLM_PROVIDER=qwen
+export QWEN_MODEL=qwen3-max
+python scripts/decomposer_plan_generator.py \
+    --input data/phage_plans.csv \
+    --passes 2 \
+    --expand-depth 2 \
+    --node-budget 10 \
+    --dump-dir results/agent_plans_phage_qwen_web/plans \
+    --concurrency 5
+```
+
+### Agent With RAG
+
+### Agent With Web Search + RAG
 
 ## Evaluation
 
@@ -210,7 +143,7 @@ python scripts/eval_plan_quality.py \
 Notes:
 
 - `generate_llm_plans.py` outputs under `<out-dir>/parsed`.
-- `direct_plan_generator.py` outputs directly under `<dump-dir>`.
+- `decomposer_plan_generator.py` outputs directly under `<dump-dir>`.
 - `bulk_generate_plans.py` outputs under `<dump-dir>/plans`.
 
 ### llm_plans_phage_qwen
@@ -291,6 +224,32 @@ python scripts/eval_plan_quality.py \
     --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
 ```
 
+### agent_plans_phage_qwen_web
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=sk-9417e4ec0397402d8fb2732f7d295692
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.jsonl
+```
+
 ### agent_plans_phage_deepseek
 
 ```shell
@@ -325,11 +284,12 @@ python scripts/eval_plan_quality.py \
  # qwen-max 评测（plan_scores_qwen.csv）
 python scripts/plot_plan_score_bars.py \
     --files \
+      results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
       results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
       results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
       results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
       results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --labels agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
     --output results/score_bars_qwen.png
 ```
 
@@ -337,25 +297,39 @@ python scripts/plot_plan_score_bars.py \
  # deepseek-v3 评测（plan_scores_deepseekv3.csv）
 python scripts/plot_plan_score_bars.py \
     --files \
+      results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
       results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
       results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
       results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
       results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --labels agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
     --output results/score_bars_deepseekv3.png
 ```
 
-### Boxplots (per metric)
+### Violin plots (per metric)
 
 ```shell
 python scripts/plot_plan_score_boxplots.py \
   --files \
+    results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
     results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
     results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
     results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
     results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-  --labels agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
   --output-dir results/score_boxplots_qwen
+```
+
+```shell
+python scripts/plot_plan_score_boxplots.py \
+  --files \
+    results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
+  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --output-dir results/score_boxplots_deepseekv3
 ```
 
 ### Demo data + plots (synthetic)
@@ -372,11 +346,12 @@ python scripts/plot_plan_score_radars.py \
   --output-dir results/score_radars
 ```
 
-Example (restrict to four run folders + choose eval tag):
+Example (restrict to five run folders + choose eval tag):
 
 ```shell
 python scripts/plot_plan_score_radars.py \
   --run-dirs \
+    results/agent_plans_phage_qwen_web \
     results/agent_plans_phage_deepseek \
     results/agent_plans_phage_qwen \
     results/llm_plans_phage_deepseek \
@@ -395,11 +370,12 @@ shared across the run folders (e.g., `qwen`, `deepseekv3`).
   python scripts/plot_plan_score_bars_by_category.py \
     --category-csv data/phage_plans.csv \
     --files \
+      results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
       results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
       results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
       results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
       results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --labels agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
     --output-dir results/score_bars_by_category_qwen
 ```
 
@@ -408,10 +384,11 @@ shared across the run folders (e.g., `qwen`, `deepseekv3`).
   python scripts/plot_plan_score_bars_by_category.py \
     --category-csv data/phage_plans.csv \
     --files \
+      results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
       results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
       results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
       results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
       results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --labels agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
     --output-dir results/score_bars_by_category_deepseekv3
 ```
