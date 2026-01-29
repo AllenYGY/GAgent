@@ -30,7 +30,7 @@ export LLM_PROVIDER=qwen
 export QWEN_API_KEY=YOUR_QWEN_API_KEY
 export QWEN_MODEL=deepseek-v3
 
-  python scripts/generate_llm_plans.py \
+python scripts/generate_llm_plans.py \
     --input data/phage_plans.csv \
     --provider qwen \
     --model deepseek-v3 \
@@ -47,6 +47,56 @@ python scripts/generate_llm_plans.py \
     --out-dir results/llm_plans_phage_qwen \
     --concurrency 4 \
     --max-retries 2
+```
+
+### Evaluation (qwen3-max + deepseek-v3)
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_qwen/parsed \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
+    --jsonl-output results/llm_plans_phage_qwen/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_qwen/parsed \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
+```
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_deepseek/parsed \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
+    --jsonl-output results/llm_plans_phage_deepseek/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_deepseek/parsed \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.jsonl
 ```
 
 ## Agent Plan
@@ -86,6 +136,56 @@ python scripts/decomposer_plan_generator.py \
     --concurrency 5
 ```
 
+#### Evaluation (qwen3-max + deepseek-v3)
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=sk-17c45c123dd1403d80cc78aa77d46c10
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
+```
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_deepseek/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=sk-17c45c123dd1403d80cc78aa77d46c10
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.jsonl
+```
+
 ### Decomposer With Web Search
 
 ```shell
@@ -103,7 +203,7 @@ python scripts/decomposer_plan_generator.py \
     --passes 2 \
     --expand-depth 2 \
     --node-budget 10 \
-    --dump-dir results/agent_plans_phage_deepseek_web/plans \
+    --dump-dir results/agent_plans_phage_deepseek_web_v2/plans \
     --concurrency 5
 ```
 
@@ -117,8 +217,58 @@ python scripts/decomposer_plan_generator.py \
     --passes 2 \
     --expand-depth 2 \
     --node-budget 10 \
-    --dump-dir results/agent_plans_phage_qwen_web/plans \
+    --dump-dir results/agent_plans_phage_qwen_web_v2/plans \
     --concurrency 5
+```
+
+#### Evaluation (qwen3-max + deepseek-v3)
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.jsonl
+```
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web/eval/plan_scores_deepseekv3.jsonl
 ```
 
 ### Agent With RAG
@@ -146,137 +296,9 @@ Notes:
 - `decomposer_plan_generator.py` outputs directly under `<dump-dir>`.
 - `bulk_generate_plans.py` outputs under `<dump-dir>/plans`.
 
-### llm_plans_phage_qwen
+Run-specific eval commands are listed alongside each generation section above to avoid duplication.
 
-```shell
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_qwen/parsed \
-    --provider qwen \
-    --model qwen3-max \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
-    --jsonl-output results/llm_plans_phage_qwen/eval/plan_scores_qwen.jsonl
-```
-
-```shell
-export QWEN_API_KEY=YOUR_QWEN_API_KEY
-export QWEN_MODEL=deepseek-v3
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_qwen/parsed \
-    --provider qwen \
-    --model deepseek-v3 \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
-```
-
-### llm_plans_phage_deepseek
-
-```shell
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_deepseek/parsed \
-    --provider qwen \
-    --model qwen3-max \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --jsonl-output results/llm_plans_phage_deepseek/eval/plan_scores_qwen.jsonl
-```
-
-```shell
-export QWEN_API_KEY=YOUR_QWEN_API_KEY
-export QWEN_MODEL=deepseek-v3
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/llm_plans_phage_deepseek/parsed \
-    --provider qwen \
-    --model deepseek-v3 \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.jsonl
-```
-
-### agent_plans_phage_qwen
-
-```shell
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen/plans \
-    --provider qwen \
-    --model qwen3-max \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
-    --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_qwen.jsonl
-```
-
-```shell
-export QWEN_API_KEY=YOUR_QWEN_API_KEY
-export QWEN_MODEL=deepseek-v3
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen/plans \
-    --provider qwen \
-    --model deepseek-v3 \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
-```
-
-### agent_plans_phage_qwen_web
-
-```shell
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
-    --provider qwen \
-    --model qwen3-max \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
-    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.jsonl
-```
-
-```shell
-export QWEN_API_KEY=sk-9417e4ec0397402d8fb2732f7d295692
-export QWEN_MODEL=deepseek-v3
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
-    --provider qwen \
-    --model deepseek-v3 \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.jsonl
-```
-
-### agent_plans_phage_deepseek
-
-```shell
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek/plans \
-    --provider qwen \
-    --model qwen3-max \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --jsonl-output results/agent_plans_phage_deepseek/eval/plan_scores_qwen.jsonl
-```
-
-```shell
-export QWEN_API_KEY=YOUR_QWEN_API_KEY
-export QWEN_MODEL=deepseek-v3
-python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek/plans \
-    --provider qwen \
-    --model deepseek-v3 \
-    --batch-size 2 \
-    --max-retries 3 \
-    --output results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.jsonl
-```
-
-## Plotting
+## Visualization
 
 ### Overall
 
@@ -312,11 +334,12 @@ python scripts/plot_plan_score_bars.py \
 python scripts/plot_plan_score_boxplots.py \
   --files \
     results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_deepseek_web/eval/plan_scores_qwen.csv \
     results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
     results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
     results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
     results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
   --output-dir results/score_boxplots_qwen
 ```
 
@@ -324,11 +347,12 @@ python scripts/plot_plan_score_boxplots.py \
 python scripts/plot_plan_score_boxplots.py \
   --files \
     results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek_web/eval/plan_scores_deepseekv3.csv \
     results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
     results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
     results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
     results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
   --output-dir results/score_boxplots_deepseekv3
 ```
 
@@ -346,17 +370,31 @@ python scripts/plot_plan_score_radars.py \
   --output-dir results/score_radars
 ```
 
-Example (restrict to five run folders + choose eval tag):
+Example (restrict to six run folders + choose eval tag):
+
+```shell
+python scripts/plot_plan_score_radars.py \
+  --run-dirs \
+    results/agent_plans_phage_qwen_web_v2 \
+    results/agent_plans_phage_deepseek_web_v2 \
+    results/agent_plans_phage_deepseek \
+    results/agent_plans_phage_qwen \
+    results/llm_plans_phage_deepseek \
+    results/llm_plans_phage_qwen \
+  --eval-tag qwen deepseekv3\
+  --output-dir results/score_radars
+```
 
 ```shell
 python scripts/plot_plan_score_radars.py \
   --run-dirs \
     results/agent_plans_phage_qwen_web \
+    results/agent_plans_phage_deepseek_web \
     results/agent_plans_phage_deepseek \
     results/agent_plans_phage_qwen \
     results/llm_plans_phage_deepseek \
     results/llm_plans_phage_qwen \
-  --eval-tag qwen \
+  --eval-tag qwen deepseekv3\
   --output-dir results/score_radars
 ```
 

@@ -1,6 +1,7 @@
 # noqa: D401 - module-level documentation handled in docs/decompose_task_plan.md
 from __future__ import annotations
 
+import json
 import logging
 from collections import deque
 from dataclasses import dataclass
@@ -102,6 +103,11 @@ class DecompositionPromptBuilder:
                 [
                     "\n=== WEB CONTEXT ===",
                     web_context,
+                    "\n=== WEB CONTEXT RULES ===",
+                    "- Use web context when it improves specificity (tools, versions, parameters, thresholds, data sources).",
+                    "- Do not force web details into unrelated tasks.",
+                    "- Summarize web info into executable details; do not paste long quotes.",
+                    "- If web context is used, include a short 'web_search' entry in child.context.sections.",
                 ]
             )
         prompt.extend(
@@ -234,6 +240,15 @@ class PlanDecomposer:
             "- Use search only if external info is needed to decompose the node.",
             "- If use_search is false, set query to an empty string.",
             "- Keep query concise (<= 120 characters).",
+            "\nQUERY GUIDELINES (when use_search=true):",
+            "- Query MUST include:",
+            "  (1) target entity/domain,",
+            "  (2) task type or method,",
+            "  (3) at least one constraint (data type/platform/threshold/species),",
+            "  (4) intended output (protocol/parameters/tool).",
+            "- Prefer using concrete terms from node name/instruction.",
+            "- Avoid generic queries (no single-word queries).",
+            "- Aim for 4–8 keywords, compact but specific.",
         ]
         return "\n".join(prompt)
 
@@ -253,16 +268,55 @@ class PlanDecomposer:
         return SearchDecision(use_search=True, query=query)
 
     @staticmethod
-    def _format_web_context(payload: Dict[str, Any]) -> Tuple[str, int, Optional[str]]:
-        summary = str(payload.get("response") or payload.get("answer") or "").strip()
+    def _format_web_context(
+        payload: Dict[str, Any], *, query: Optional[str] = None
+    ) -> Tuple[str, int, Optional[str]]:
+        def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+            if not text:
+                return None
+            if "```json" in text:
+                start = text.find("```json") + len("```json")
+                end = text.find("```", start)
+                if end != -1:
+                    block = text[start:end].strip()
+                else:
+                    block = text[start:].strip()
+            else:
+                block = text.strip()
+            if block.startswith("{") and block.endswith("}"):
+                try:
+                    return json.loads(block)
+                except Exception:
+                    return None
+            return None
+
+        summary_raw = str(payload.get("response") or payload.get("answer") or "").strip()
+        parsed = _extract_json_block(summary_raw)
+        summary = summary_raw
+        reference_list: List[Dict[str, Any]] = []
+        if isinstance(parsed, dict):
+            answer = parsed.get("answer")
+            if answer:
+                summary = str(answer).strip()
+            refs = parsed.get("references") or parsed.get("sources") or []
+            if isinstance(refs, list):
+                reference_list = [item for item in refs if isinstance(item, dict)]
+
         results = payload.get("results") or []
         if not isinstance(results, list):
             results = []
+        if reference_list and not results:
+            results = reference_list
         provider = payload.get("provider")
 
         lines: List[str] = []
+        if query:
+            lines.append(f"Query: {query}")
         if summary:
-            lines.append(f"Summary: {summary}")
+            if len(summary) > 800:
+                summary = summary[:797] + "..."
+            lines.append("Key findings:")
+            lines.append(f"- {summary}")
         if results:
             lines.append("Sources:")
             for item in results[:5]:
@@ -275,6 +329,8 @@ class PlanDecomposer:
                 if url:
                     line += f" | {url}"
                 if snippet:
+                    if len(snippet) > 200:
+                        snippet = snippet[:197] + "..."
                     line += f" | {snippet}"
                 lines.append(line)
 
@@ -515,7 +571,7 @@ class PlanDecomposer:
 
                     if isinstance(payload, dict) and payload.get("success", True):
                         web_context, results_count, provider = self._format_web_context(
-                            payload
+                            payload, query=decision.query
                         )
                         if web_context:
                             self._apply_web_context(

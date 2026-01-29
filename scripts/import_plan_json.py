@@ -18,14 +18,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from app.database import init_db
 from app.repository.plan_repository import PlanRepository
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Import plan_*.json (PlanTree) into the repository.")
+    parser = argparse.ArgumentParser(
+        description="Import plan_*.json (PlanTree) into the repository."
+    )
     parser.add_argument(
         "--input",
         required=True,
@@ -62,7 +64,9 @@ def insert_plan(repo: PlanRepository, data: Dict, prefix: str, dry_run: bool) ->
     if dry_run:
         return -1
 
-    plan = repo.create_plan(title=full_title, description=description, metadata=metadata)
+    plan = repo.create_plan(
+        title=full_title, description=description, metadata=metadata
+    )
     ext_to_db: Dict[int, int] = {}
     pending: List[Dict] = []
     for key, node in nodes.items():
@@ -70,18 +74,21 @@ def insert_plan(repo: PlanRepository, data: Dict, prefix: str, dry_run: bool) ->
             ext_id = int(node.get("id") or key)
         except Exception:
             continue
-        pending.append(
-            {
-                "ext_id": ext_id,
-                "name": node.get("name") or f"Task {ext_id}",
-                "instruction": node.get("instruction") or node.get("description") or node.get("name") or "",
-                "parent_id": node.get("parent_id"),
-                "dependencies": node.get("dependencies") or [],
-                "status": node.get("status") or "pending",
-                "position": node.get("position"),
-                "metadata": node.get("metadata") if isinstance(node.get("metadata"), dict) else {},
-            }
-        )
+        pending.append({
+            "ext_id": ext_id,
+            "name": node.get("name") or f"Task {ext_id}",
+            "instruction": node.get("instruction")
+            or node.get("description")
+            or node.get("name")
+            or "",
+            "parent_id": node.get("parent_id"),
+            "dependencies": node.get("dependencies") or [],
+            "status": node.get("status") or "pending",
+            "position": node.get("position"),
+            "metadata": node.get("metadata")
+            if isinstance(node.get("metadata"), dict)
+            else {},
+        })
 
     # Insert respecting parent/dependency availability
     progress = True
@@ -107,7 +114,9 @@ def insert_plan(repo: PlanRepository, data: Dict, prefix: str, dry_run: bool) ->
                 status=task["status"],
                 dependencies=db_deps,
                 metadata=task["metadata"],
-                position=int(task["position"]) if task["position"] is not None else None,
+                position=int(task["position"])
+                if task["position"] is not None
+                else None,
             )
             ext_to_db[task["ext_id"]] = node.id
             progress = True

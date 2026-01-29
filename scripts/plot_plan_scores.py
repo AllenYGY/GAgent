@@ -18,9 +18,10 @@ DataFrame, and produces publication-friendly heatmaps:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, cast
+from typing import List, Optional, cast
 
 import matplotlib
 
@@ -109,9 +110,7 @@ def load_all_scores(scores_dir: Path, include: Optional[List[str]]) -> pd.DataFr
         df = pd.read_csv(csv_path)
         missing = [dim for dim in DIMENSIONS if dim not in df.columns]
         if missing:
-            print(
-                f"[WARN] Skipping {csv_path} because it lacks columns: {missing}"
-            )
+            print(f"[WARN] Skipping {csv_path} because it lacks columns: {missing}")
             continue
         df["provider"] = provider
         df["source_file"] = csv_path.name
@@ -129,11 +128,13 @@ def ensure_output_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def plot_provider_dimension_heatmap(df: pd.DataFrame, output: Path) -> None:
+def plot_provider_dimension_heatmap(
+    df: pd.DataFrame, output: Path, score_max: int
+) -> None:
     pivot = df.groupby("provider")[DIMENSIONS].mean().sort_index()
     fig, ax = plt.subplots(figsize=(1.4 * len(DIMENSIONS), 0.6 * len(pivot)))
     values = np.asarray(pivot.values, dtype=float)
-    im = ax.imshow(values, cmap="viridis", vmin=1, vmax=5, aspect="auto")
+    im = ax.imshow(values, cmap="viridis", vmin=1, vmax=score_max, aspect="auto")
     ax.set_xticks(range(len(DIMENSIONS)))
     ax.set_xticklabels(
         [dim.replace("_", "\n").title() for dim in DIMENSIONS], rotation=0, fontsize=10
@@ -152,7 +153,7 @@ def plot_provider_dimension_heatmap(df: pd.DataFrame, output: Path) -> None:
             fontsize=9,
         )
     cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-    cbar.set_label("Score (1–5)")
+    cbar.set_label(f"Score (1–{score_max})")
     plt.tight_layout()
     plt.savefig(output, dpi=220)
     plt.close(fig)
@@ -171,6 +172,7 @@ def plot_plan_dimension_heatmaps_per_provider(
     output_dir: Path,
     top_plans: int,
     plan_order: str,
+    score_max: int,
 ) -> None:
     grouped = df.groupby("provider")
     for provider, chunk in grouped:
@@ -182,7 +184,7 @@ def plot_plan_dimension_heatmaps_per_provider(
         pivot = filtered.groupby("plan_id")[DIMENSIONS].mean().loc[top_ids]
         fig, ax = plt.subplots(figsize=(1.4 * len(DIMENSIONS), 0.35 * len(pivot) + 1))
         values = np.asarray(pivot.values, dtype=float)
-        im = ax.imshow(values, cmap="magma", vmin=1, vmax=5, aspect="auto")
+        im = ax.imshow(values, cmap="magma", vmin=1, vmax=score_max, aspect="auto")
         ax.set_xticks(range(len(DIMENSIONS)))
         ax.set_xticklabels(
             [dim.replace("_", "\n").title() for dim in DIMENSIONS], fontsize=10
@@ -194,14 +196,16 @@ def plot_plan_dimension_heatmaps_per_provider(
             fontsize=14,
         )
         cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-        cbar.set_label("Score (1–5)")
+        cbar.set_label(f"Score (1–{score_max})")
         plt.tight_layout()
         target = output_dir / f"plan_dimension_heatmap_{provider}.png"
         plt.savefig(target, dpi=220)
         plt.close(fig)
 
 
-def plot_plan_provider_heatmap(df: pd.DataFrame, output: Path, top_plans: int, plan_order: str) -> None:
+def plot_plan_provider_heatmap(
+    df: pd.DataFrame, output: Path, top_plans: int, plan_order: str, score_max: int
+) -> None:
     ranking = _rank_plans(df, plan_order).sort_values(ascending=False)
     top_ids = list(ranking.head(top_plans).index)
     filtered = df[df["plan_id"].isin(top_ids)]
@@ -218,14 +222,14 @@ def plot_plan_provider_heatmap(df: pd.DataFrame, output: Path, top_plans: int, p
     providers = [str(p) for p in pivot.columns]
     fig, ax = plt.subplots(figsize=(0.9 * len(providers) + 2, 0.4 * len(pivot) + 1))
     values = np.asarray(pivot.values, dtype=float)
-    im = ax.imshow(values, cmap="plasma", vmin=1, vmax=5, aspect="auto")
+    im = ax.imshow(values, cmap="plasma", vmin=1, vmax=score_max, aspect="auto")
     ax.set_xticks(range(len(providers)))
     ax.set_xticklabels([p.upper() for p in providers], fontsize=10)
     ax.set_yticks(range(len(pivot)))
     ax.set_yticklabels([f"Plan {pid}" for pid in pivot.index], fontsize=9)
     ax.set_title("Average Plan Score per Provider", fontsize=14)
     cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
-    cbar.set_label("Score (1–5)")
+    cbar.set_label(f"Score (1–{score_max})")
     plt.tight_layout()
     plt.savefig(output, dpi=220)
     plt.close(fig)
@@ -233,22 +237,31 @@ def plot_plan_provider_heatmap(df: pd.DataFrame, output: Path, top_plans: int, p
 
 def main() -> None:
     args = parse_args()
-    include = [name.lower() for name in args.include_provider] if args.include_provider else None
+    include = (
+        [name.lower() for name in args.include_provider]
+        if args.include_provider
+        else None
+    )
     df = load_all_scores(args.scores_dir, include)
     ensure_output_dir(args.output_dir)
+    score_max = max(5, int(math.ceil(df[DIMENSIONS].max().max())))
 
-    plot_provider_dimension_heatmap(df, args.output_dir / "dimension_provider_heatmap.png")
+    plot_provider_dimension_heatmap(
+        df, args.output_dir / "dimension_provider_heatmap.png", score_max
+    )
     plot_plan_dimension_heatmaps_per_provider(
         df,
         args.output_dir,
         top_plans=args.top_plans,
         plan_order=args.plan_order,
+        score_max=score_max,
     )
     plot_plan_provider_heatmap(
         df,
         args.output_dir / "plan_provider_heatmap.png",
         top_plans=args.top_plans,
         plan_order=args.plan_order,
+        score_max=score_max,
     )
     print(f"[INFO] Saved heatmaps to {args.output_dir}")
 

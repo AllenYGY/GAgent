@@ -292,6 +292,11 @@ export interface ToolResultPayload {
     response?: string;
     answer?: string;
     results?: ToolResultItem[] | null;
+    records_preview?: Record<string, any>[] | null;
+    record_count?: number;
+    api?: string;
+    fallback_reason?: string;
+    original_query?: string;
     error?: string;
     success?: boolean;
     search_engine?: string;

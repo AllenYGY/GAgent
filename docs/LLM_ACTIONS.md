@@ -35,7 +35,7 @@ LLM responses must conform to the JSON schema:
 | `task_operation`  | Task tree CRUD and status updates                      |
 | `context_request` | Retrieve additional context from the backend           |
 | `system_operation`| System-level prompts (e.g., help)                      |
-| `tool_operation`  | Invoke external tools（目前支持 `web_search`、`graph_rag`） |
+| `tool_operation`  | Invoke external tools（目前支持 `web_search`、`graph_rag`、`springer_nature`） |
 
 ## Plan-level actions
 
@@ -63,6 +63,7 @@ LLM responses must conform to the JSON schema:
 | `request_subgraph`        | `context_request`| `logical_id` or `task_id`                    | `max_depth`                                       | Requests additional graph detail; must be the only action in a reply. |
 | `web_search`              | `tool_operation`| `query` (string)                              | `max_results`, `locale`, `time_range`, `provider` | Calls configured web search provider并返回摘要、引用链接，结果附在回复 metadata。                                    |
 | `graph_rag`               | `tool_operation`| `query` (string)                              | `top_k`, `hops`, `return_subgraph`, `focus_entities` | 查询噬菌体/宿主知识图谱，返回三元组、提示词以及可选子图 JSON；结果同样写入 metadata。                   |
+| `springer_nature`         | `tool_operation`| `api` (string, meta/openaccess), `q` (string) | `p`, `s`, `fetch_all`, `is_premium`, `api_key` | 检索 Springer Nature Meta/Open Access；成功结果写入 metadata。 |
 
 > `anchor_position` 支持 `first_child` / `last_child` / `before` / `after`。当使用 `before` 或 `after` 时，必须同时提供 `anchor_task_id`（且锚点与目标父节点一致）；否则 fallback 到默认的末尾插入。指定绝对 `position` 会跳过锚点计算，主要供调试或自动化脚本使用。旧版字段 `insert_before` / `insert_after` 仍被接受，并分别映射为 `anchor_position=before/after`。
 
@@ -122,6 +123,28 @@ Call Graph RAG to collect phage–host triples:
         "hops": 1,
         "return_subgraph": true,
         "focus_entities": ["T4 phage", "E. coli"]
+      },
+      "blocking": true,
+      "order": 1
+    }
+  ]
+}
+```
+
+Call Springer Nature Meta API to fetch metadata:
+
+```json
+{
+  "llm_reply": { "message": "已检索 Springer Nature 元数据，以下是可用记录摘要。" },
+  "actions": [
+    {
+      "kind": "tool_operation",
+      "name": "springer_nature",
+      "parameters": {
+        "api": "meta",
+        "q": "keyword:\"cancer\" year:2023",
+        "p": 5,
+        "s": 1
       },
       "blocking": true,
       "order": 1

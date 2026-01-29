@@ -2232,6 +2232,7 @@ class StructuredChatAgent:
         allow_web_search = self.extra_context.get("allow_web_search", True)
         allow_rerun_task = self.extra_context.get("allow_rerun_task", True)
         allow_graph_rag = self.extra_context.get("allow_graph_rag", True)
+        allow_springer_nature = self.extra_context.get("allow_springer_nature", True)
         allow_show_tasks = self.extra_context.get("allow_show_tasks", False)
         return build_action_catalog(
             plan_bound,
@@ -2239,6 +2240,7 @@ class StructuredChatAgent:
             allow_web_search=allow_web_search,
             allow_rerun_task=allow_rerun_task,
             allow_graph_rag=allow_graph_rag,
+            allow_springer_nature=allow_springer_nature,
             allow_show_tasks=allow_show_tasks,
         )
 
@@ -2649,6 +2651,25 @@ class StructuredChatAgent:
                 "return_subgraph": return_subgraph,
                 "focus_entities": focus_entities,
             }
+
+        elif tool_name == "springer_nature":
+            query = params.get("q")
+            if not isinstance(query, str) or not query.strip():
+                return AgentStep(
+                    action=action,
+                    success=False,
+                    message="springer_nature requires a non-empty q.",
+                    details={"error": "missing_query", "tool": tool_name},
+                )
+
+            api_name = params.get("api")
+            if isinstance(api_name, str) and api_name.strip().lower() in {"tdm", "metadata"}:
+                return AgentStep(
+                    action=action,
+                    success=False,
+                    message="springer_nature only supports meta and openaccess in this deployment.",
+                    details={"error": "unsupported_api", "tool": tool_name},
+                )
 
         else:
             return AgentStep(
@@ -3402,12 +3423,16 @@ class StructuredChatAgent:
             sanitized: Dict[str, Any] = {"tool": tool_name}
             for key in (
                 "query",
+                "api",
                 "provider",
                 "success",
                 "response",
                 "answer",
                 "total_results",
+                "record_count",
                 "fallback_from",
+                "fallback_reason",
+                "original_query",
                 "code",
                 "cache_hit",
             ):
@@ -3428,6 +3453,12 @@ class StructuredChatAgent:
                         })
                 if trimmed:
                     sanitized["results"] = trimmed
+            records = raw_result.get("records")
+            if isinstance(records, list):
+                preview = records[:3]
+                sanitized["records_preview"] = preview
+                if "record_count" not in sanitized:
+                    sanitized["record_count"] = len(records)
             result_block = raw_result.get("result")
             if isinstance(result_block, dict):
                 if "prompt" in result_block and isinstance(result_block["prompt"], str):
@@ -3522,6 +3553,21 @@ class StructuredChatAgent:
                 if len(snippet) > 120:
                     snippet = snippet[:117] + "..."
                 return f"{prefix} finished. Prompt summary: {snippet}"
+            return f"{prefix} finished."
+        if tool_name == "springer_nature":
+            api = result.get("api") or "springer"
+            query = result.get("query") or ""
+            prefix = (
+                f"Springer Nature {api} search“{query}”"
+                if query
+                else f"Springer Nature {api} search"
+            )
+            if result.get("success") is False:
+                error = result.get("error") or "Execution failed"
+                return f"{prefix} failed: {error}"
+            record_count = result.get("record_count")
+            if isinstance(record_count, int):
+                return f"{prefix} finished with {record_count} records."
             return f"{prefix} finished."
         return f"{tool_name} finished execution."
 

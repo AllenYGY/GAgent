@@ -119,6 +119,7 @@ class EvaluationRecord:
     plan_id: int
     title: str
     scores: Dict[str, int]
+    rationales: Dict[str, str]
     comments: str
     raw: Dict[str, Any]
 
@@ -409,11 +410,15 @@ def build_prompt(plan: PlanPayload, *, max_nodes: Optional[int]) -> str:
         "plan_id": plan.plan_id,
         "title": plan.title,
         "scores": {dim["key"]: 1 for dim in DIMENSIONS},
-        "comments": 'Optional short justification ("" if none).',
+        "rationales": {
+            dim["key"]: "Short rationale (<=40 words)." for dim in DIMENSIONS
+        },
+        "comments": 'Optional short overall note ("" if none).',
     }
     instructions = (
         "You are an expert reviewer. Score each dimension using integers 1–5. "
-        "Penalize missing information by lowering Completeness/Accuracy and mention it in comments."
+        "Provide a short rationale per dimension (<=40 words each). "
+        "Penalize missing information by lowering Contextual Completeness/Accuracy and mention it in rationales."
     )
     prompt = (
         f"{instructions}\n\n"
@@ -430,6 +435,7 @@ def build_prompt(plan: PlanPayload, *, max_nodes: Optional[int]) -> str:
         "- Utilize the most rigorous standard audit program.\n"
         "- Do not include markdown fences or commentary outside the JSON.\n"
         "- Every score must be an integer between 1 and 5.\n"
+        "- Every rationale must be a short string (<=40 words).\n"
         "- Keep comments under 80 words; use an empty string if there is nothing to add.\n"
     )
     return prompt
@@ -459,6 +465,26 @@ def validate_response(
         if not (1 <= value <= 5):
             return None
         parsed_scores[key] = value
+    raw_rationales = (
+        data.get("rationales")
+        or data.get("rationale")
+        or data.get("reasons")
+        or data.get("justifications")
+    )
+    if not isinstance(raw_rationales, dict):
+        return None
+    parsed_rationales: Dict[str, str] = {}
+    for dim in DIMENSIONS:
+        key = dim["key"]
+        value = raw_rationales.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        if not value:
+            return None
+        parsed_rationales[key] = value
     title = str(data.get("title") or plan.title)
     comments = data.get("comments")
     if comments is None:
@@ -478,11 +504,13 @@ def validate_response(
         plan_id=plan_id,
         title=title,
         scores=parsed_scores,
+        rationales=parsed_rationales,
         comments=comments,
         raw={
             "plan_id": plan_id,
             "title": title,
             "scores": parsed_scores,
+            "rationales": parsed_rationales,
             "comments": comments,
         },
     )
@@ -579,9 +607,9 @@ def write_outputs(
         return
     output_path.parent.mkdir(parents=True, exist_ok=True)
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = (
-        ["plan_id", "title"] + [dim["key"] for dim in DIMENSIONS] + ["comments"]
-    )
+    score_fields = [dim["key"] for dim in DIMENSIONS]
+    rationale_fields = [f"rationale_{dim['key']}" for dim in DIMENSIONS]
+    fieldnames = ["plan_id", "title"] + score_fields + rationale_fields + ["comments"]
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -593,6 +621,8 @@ def write_outputs(
             }
             for key, value in record.scores.items():
                 row[key] = value
+            for key, value in record.rationales.items():
+                row[f"rationale_{key}"] = value
             writer.writerow(row)
     with jsonl_path.open("w", encoding="utf-8") as handle:
         for record in records:
@@ -672,7 +702,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
         service = LLMService(llm_client)
         # Place prompts alongside outputs, under the output directory
-        prompt_dir = (args.output.parent / "Prompts") if args.output else Path("results/Prompts")
+        prompt_dir = (
+            (args.output.parent / "Prompts") if args.output else Path("results/Prompts")
+        )
         try:
             records = asyncio.run(
                 evaluate_plans_async(

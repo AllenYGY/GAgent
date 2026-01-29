@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -24,10 +24,10 @@ from app.config.decomposer_config import get_decomposer_settings
 from app.config.executor_config import get_executor_settings
 from app.database import init_db
 from app.repository.plan_repository import PlanRepository
+from app.routers.chat_routes import StructuredChatAgent
 from app.services.plans.plan_decomposer import PlanDecomposer
 from app.services.plans.plan_executor import PlanExecutor
 from app.services.plans.plan_session import PlanSession
-from app.routers.chat_routes import StructuredChatAgent
 
 
 def _parse_json_arg(value: Optional[str], *, expected_type: type, label: str):
@@ -57,21 +57,27 @@ async def _run(args: argparse.Namespace) -> None:
         try:
             session.bind(args.plan_id)
         except ValueError as exc:
-            raise SystemExit(f"[ERROR] Failed to bind plan {args.plan_id}: {exc}") from exc
+            raise SystemExit(
+                f"[ERROR] Failed to bind plan {args.plan_id}: {exc}"
+            ) from exc
 
     decomposer_settings = get_decomposer_settings()
     plan_decomposer: Optional[PlanDecomposer] = None
     if decomposer_settings.model:
         plan_decomposer = PlanDecomposer(repo=repo, settings=decomposer_settings)
     else:
-        print("[WARN] PlanDecomposer disabled (DECOMP_MODEL not set). Auto decomposition will be skipped.")
+        print(
+            "[WARN] PlanDecomposer disabled (DECOMP_MODEL not set). Auto decomposition will be skipped."
+        )
 
     executor_settings = get_executor_settings()
     plan_executor: Optional[PlanExecutor] = None
     if executor_settings.model:
         plan_executor = PlanExecutor(repo=repo, settings=executor_settings)
     else:
-        print("[WARN] PlanExecutor disabled (PLAN_EXECUTOR_MODEL not set). execute_plan / rerun_task actions will fail.")
+        print(
+            "[WARN] PlanExecutor disabled (PLAN_EXECUTOR_MODEL not set). execute_plan / rerun_task actions will fail."
+        )
 
     agent = StructuredChatAgent(
         plan_session=session,
@@ -94,11 +100,15 @@ async def _run(args: argparse.Namespace) -> None:
     if not result.steps:
         print("(no actions executed)")
     for idx, step in enumerate(result.steps, start=1):
-        print(f"[{idx}] {step.action.kind}/{step.action.name} -> success={step.success}")
+        print(
+            f"[{idx}] {step.action.kind}/{step.action.name} -> success={step.success}"
+        )
         if step.message:
             print(f"    message: {step.message}")
         if step.details:
-            print(f"    details: {json.dumps(step.details, ensure_ascii=False, indent=2)}")
+            print(
+                f"    details: {json.dumps(step.details, ensure_ascii=False, indent=2)}"
+            )
 
     _print_heading("Summary")
     print(f"Result success     : {result.success}")
@@ -117,7 +127,9 @@ async def _run(args: argparse.Namespace) -> None:
             print(f"[WARN] Unable to load plan tree #{plan_to_show}: {exc}")
         else:
             _print_heading(f"Plan #{plan_to_show} Outline")
-            outline = tree.to_outline(max_depth=args.max_depth, max_nodes=args.max_nodes)
+            outline = tree.to_outline(
+                max_depth=args.max_depth, max_nodes=args.max_nodes
+            )
             print(outline)
             if args.dump_nodes:
                 _print_heading("Plan Nodes (truncated)")
@@ -141,13 +153,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("prompt", help="User prompt to send to the agent.")
     parser.add_argument("--session-id", help="Optional session identifier.")
     parser.add_argument("--conversation-id", type=int, help="Optional conversation id.")
-    parser.add_argument("--plan-id", type=int, help="Bind to an existing plan before sending the prompt.")
+    parser.add_argument(
+        "--plan-id",
+        type=int,
+        help="Bind to an existing plan before sending the prompt.",
+    )
     parser.add_argument("--context", help="JSON object string passed as extra_context.")
-    parser.add_argument("--history", help="JSON array string for prior chat history items.")
-    parser.add_argument("--db-root", help="Override DB root path (useful for sandboxes).")
-    parser.add_argument("--max-depth", type=int, default=4, help="Max depth when printing plan outline.")
-    parser.add_argument("--max-nodes", type=int, default=60, help="Max nodes when printing plan outline.")
-    parser.add_argument("--dump-nodes", action="store_true", help="Dump node summaries after outline.")
+    parser.add_argument(
+        "--history", help="JSON array string for prior chat history items."
+    )
+    parser.add_argument(
+        "--db-root", help="Override DB root path (useful for sandboxes)."
+    )
+    parser.add_argument(
+        "--max-depth", type=int, default=4, help="Max depth when printing plan outline."
+    )
+    parser.add_argument(
+        "--max-nodes",
+        type=int,
+        default=60,
+        help="Max nodes when printing plan outline.",
+    )
+    parser.add_argument(
+        "--dump-nodes", action="store_true", help="Dump node summaries after outline."
+    )
     return parser
 
 

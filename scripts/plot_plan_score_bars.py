@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 from typing import List
 
@@ -157,6 +158,8 @@ def main() -> None:
 
     x = np.arange(len(METRICS))
     width = 0.8 / max(1, len(unique_labels))  # total bar span within [0.2,0.8]
+    all_vals = [v for series in data.values() for v in series if not np.isnan(v)]
+    score_max = max(5, int(math.ceil(max(all_vals)))) if all_vals else 5
 
     plt.figure(figsize=tuple(args.figsize), dpi=args.dpi)
     for idx, lab in enumerate(unique_labels):
@@ -176,7 +179,7 @@ def main() -> None:
 
     plt.xticks(x, METRICS, rotation=30, ha="right")
     plt.ylabel("Score")
-    plt.ylim(0, 5.1)
+    plt.ylim(0, score_max + 0.5)
     plt.title("Plan quality scores (grouped bars)")
     plt.legend()
     plt.tight_layout()

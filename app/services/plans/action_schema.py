@@ -23,6 +23,16 @@ ACTION_SCHEMAS: Dict[Tuple[str, str], Schema] = {
             "focus_entities": str,
         },
     },
+    ("tool_operation", "springer_nature"): {
+        "required": {"api": str, "q": str},
+        "optional": {
+            "p": int,
+            "s": int,
+            "fetch_all": bool,
+            "is_premium": bool,
+            "api_key": str,
+        },
+    },
 
     ("plan_operation", "create_plan"): {"required": {"title": str}, "optional": {"description": str}},
     ("plan_operation", "list_plans"): {"required": {}, "optional": {}},

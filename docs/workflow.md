@@ -69,7 +69,7 @@ LLM 提示中的大纲由 `PlanTree.to_outline()` 生成，默认：
 
 ### tool_operation
 
-- `web_search` / `graph_rag`：工具结果会写入 `metadata.tool_results`，并缓存到 `recent_tool_results`（最多 5 条）
+- `web_search` / `graph_rag` / `springer_nature`：工具结果会写入 `metadata.tool_results`，并缓存到 `recent_tool_results`（最多 5 条）
 
 ## 6) 持久化
 

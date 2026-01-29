@@ -15,6 +15,7 @@ from .tools_impl import (
     file_operations_tool,
     graph_rag_tool,
     internal_api_tool,
+    springer_nature_tool,
     web_search_tool,
 )
 
@@ -96,6 +97,16 @@ class ToolBoxIntegration:
             handler=graph_rag_tool["handler"],
             tags=graph_rag_tool.get("tags", []),
             examples=graph_rag_tool.get("examples", []),
+        )
+
+        register_tool(
+            name=springer_nature_tool["name"],
+            description=springer_nature_tool["description"],
+            category=springer_nature_tool["category"],
+            parameters_schema=springer_nature_tool["parameters_schema"],
+            handler=springer_nature_tool["handler"],
+            tags=springer_nature_tool.get("tags", []),
+            examples=springer_nature_tool.get("examples", []),
         )
 
         logger.info("Built-in tools registered")

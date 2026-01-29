@@ -115,8 +115,8 @@ class PlanTree(BaseModel):
             # context
             if node.context_combined:
                 lines.append(f"{indent}  context: {node.context_combined.strip()}")
-            elif node.context_sections:
-                for sec in node.context_sections[:2]:
+            if node.context_sections:
+                for sec in node.context_sections:
                     title = sec.get("title") or "context section"
                     content = (sec.get("content") or "").strip()
                     if content:

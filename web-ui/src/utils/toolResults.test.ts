@@ -80,4 +80,27 @@ describe('toolResults utilities', () => {
     expect(payloads).toHaveLength(1);
     expect(payloads[0].result?.query).toBe('abc');
   });
+
+  it('preserves springer result fields', () => {
+    const payloads = collectToolResultsFromMetadata([
+      {
+        name: 'springer_nature',
+        summary: 'Springer Nature meta search',
+        result: {
+          api: 'meta',
+          query: 'batch effect',
+          record_count: 2,
+          records_preview: [{ title: 'Paper A' }, { title: 'Paper B' }],
+          fallback_reason: 'basic_plan_simplified,field_constraints_removed',
+          original_query: 'batch effect sort:date',
+        },
+      },
+    ]);
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].result?.record_count).toBe(2);
+    expect(payloads[0].result?.api).toBe('meta');
+    expect(payloads[0].result?.records_preview).toHaveLength(2);
+    expect(payloads[0].result?.fallback_reason).toBe('basic_plan_simplified,field_constraints_removed');
+  });
 });

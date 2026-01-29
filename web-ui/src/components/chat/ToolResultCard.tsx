@@ -17,26 +17,33 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
 
   const sendMessage = useChatStore((state) => state.sendMessage);
 
-  const {
-    toolName,
-    introMessage,
-    header,
-    query,
-    searchItems,
-    triples,
-    responseText,
-    promptText,
-    errorText,
-    success,
-    providerLabel,
-    fallbackLabel,
-    metadata,
-    subgraph,
-    isWebSearch,
-  } = useMemo(() => {
-    const toolValue = typeof payload.name === 'string' && payload.name ? payload.name : 'tool';
-    const isWeb = toolValue === 'web_search';
-    const isGraph = toolValue === 'graph_rag';
+    const {
+      toolName,
+      introMessage,
+      header,
+      query,
+      searchItems,
+      springerRecords,
+      springerRecordCount,
+      springerApi,
+      springerFallbackReason,
+      springerOriginalQuery,
+      triples,
+      responseText,
+      promptText,
+      errorText,
+      success,
+      providerLabel,
+      fallbackLabel,
+      metadata,
+      subgraph,
+      isWebSearch,
+      isSpringer,
+    } = useMemo(() => {
+      const toolValue = typeof payload.name === 'string' && payload.name ? payload.name : 'tool';
+      const isWeb = toolValue === 'web_search';
+      const isGraph = toolValue === 'graph_rag';
+      const isSpringerTool = toolValue === 'springer_nature';
 
     const providerValue =
       isWeb && typeof payload.result?.provider === 'string'
@@ -60,24 +67,49 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
       payload.summary ??
       (successState ? 'Tool run completed' : 'Tool run failed—please try again later.');
     let intro = 'The tool call has finished processing.';
-    if (isWeb) {
-      headerText =
-        payload.summary ??
-        (successState ? 'Web search completed' : 'Web search failed—please try again later.');
-      intro = 'Web search executed to retrieve up-to-date references.';
-    } else if (isGraph) {
-      headerText =
-        payload.summary ??
-        (successState ? 'Knowledge-graph search completed' : 'Knowledge-graph search failed.');
-      intro = 'Knowledge-graph query executed.';
-    }
+      if (isWeb) {
+        headerText =
+          payload.summary ??
+          (successState ? 'Web search completed' : 'Web search failed—please try again later.');
+        intro = 'Web search executed to retrieve up-to-date references.';
+      } else if (isGraph) {
+        headerText =
+          payload.summary ??
+          (successState ? 'Knowledge-graph search completed' : 'Knowledge-graph search failed.');
+        intro = 'Knowledge-graph query executed.';
+      } else if (isSpringerTool) {
+        headerText =
+          payload.summary ??
+          (successState ? 'Springer Nature search completed' : 'Springer Nature search failed.');
+        intro = 'Springer Nature query executed.';
+      }
     const normalizedQuery =
       payload.result?.query ??
       (typeof payload.parameters?.query === 'string' ? payload.parameters.query : undefined);
+    const springerApiValue =
+      typeof payload.result?.api === 'string'
+        ? payload.result.api
+        : typeof payload.parameters?.api === 'string'
+          ? payload.parameters.api
+          : undefined;
     const resultItems =
       isWeb && Array.isArray(payload.result?.results) && payload.result?.results?.length
         ? payload.result?.results.filter(Boolean)
         : [];
+    const springerPreview =
+      Array.isArray(payload.result?.records_preview) && payload.result?.records_preview.length > 0
+        ? payload.result.records_preview
+        : [];
+    const springerRecordCountValue =
+      typeof payload.result?.record_count === 'number' ? payload.result.record_count : undefined;
+    const springerFallbackValue =
+      typeof payload.result?.fallback_reason === 'string'
+        ? payload.result.fallback_reason
+        : undefined;
+    const springerOriginalQueryValue =
+      typeof payload.result?.original_query === 'string'
+        ? payload.result.original_query
+        : undefined;
     const response =
       typeof payload.result?.response === 'string' && payload.result.response.trim().length > 0
         ? payload.result.response
@@ -95,6 +127,11 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
       header: headerText,
       query: normalizedQuery,
       searchItems: resultItems,
+      springerRecords: springerPreview,
+      springerRecordCount: springerRecordCountValue,
+      springerApi: springerApiValue,
+      springerFallbackReason: springerFallbackValue,
+      springerOriginalQuery: springerOriginalQueryValue,
       responseText: response,
       promptText: isGraph && typeof payload.result?.prompt === 'string' ? payload.result.prompt : undefined,
       errorText: error,
@@ -109,6 +146,7 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
         ? payload.result.subgraph
         : undefined,
       isWebSearch: isWeb,
+      isSpringer: isSpringerTool,
     };
   }, [payload]);
 
@@ -134,6 +172,11 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
     }
   };
 
+  const springerFallbackMap: Record<string, string> = {
+    basic_plan_simplified: 'Query normalized for basic plan support.',
+    field_constraints_removed: 'Field constraints removed due to access limits.',
+  };
+
   const collapseItems = [
     {
       key: 'result',
@@ -157,6 +200,26 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
           {query && (
             <Text type="secondary">
               Query: <Text code>{query}</Text>
+            </Text>
+          )}
+          {isSpringer && springerApi && (
+            <Text type="secondary">API: {springerApi}</Text>
+          )}
+          {isSpringer && typeof springerRecordCount === 'number' && (
+            <Text type="secondary">Records: {springerRecordCount}</Text>
+          )}
+          {isSpringer && springerOriginalQuery && (
+            <Text type="secondary">
+              Original query: <Text code>{springerOriginalQuery}</Text>
+            </Text>
+          )}
+          {isSpringer && springerFallbackReason && (
+            <Text type="secondary">
+              Note:{' '}
+              {springerFallbackReason
+                .split(',')
+                .map((reason) => springerFallbackMap[reason] ?? reason)
+                .join(' ')}
             </Text>
           )}
           {responseText && (
@@ -201,6 +264,72 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
                   </Space>
                 </List.Item>
               )}
+            />
+          )}
+          {springerRecords.length > 0 && (
+            <List<Record<string, any>>
+              size="small"
+              dataSource={springerRecords}
+              renderItem={(record, index) => {
+                const title =
+                  typeof record?.title === 'string'
+                    ? record.title
+                    : typeof record?.title?.[0] === 'string'
+                      ? record.title[0]
+                      : undefined;
+                const doi = typeof record?.doi === 'string' ? record.doi : undefined;
+                const publication =
+                  typeof record?.publicationName === 'string'
+                    ? record.publicationName
+                    : typeof record?.journalTitle === 'string'
+                      ? record.journalTitle
+                      : typeof record?.publicationTitle === 'string'
+                        ? record.publicationTitle
+                        : typeof record?.publisher === 'string'
+                          ? record.publisher
+                          : undefined;
+                const date =
+                  typeof record?.publicationDate === 'string'
+                    ? record.publicationDate
+                    : typeof record?.onlineDate === 'string'
+                      ? record.onlineDate
+                      : typeof record?.publicationYear === 'string'
+                        ? record.publicationYear
+                        : undefined;
+                const url =
+                  typeof record?.url === 'string'
+                    ? record.url
+                    : Array.isArray(record?.url) && record.url.length > 0
+                      ? typeof record.url[0] === 'string'
+                        ? record.url[0]
+                        : record.url[0]?.value ?? record.url[0]?.url
+                      : undefined;
+
+                const metaParts = [
+                  doi ? `DOI: ${doi}` : null,
+                  publication ? `Source: ${publication}` : null,
+                  date ? `Date: ${date}` : null,
+                ].filter(Boolean);
+
+                return (
+                  <List.Item key={`${doi ?? title ?? index}`}>
+                    <Space direction="vertical" size={2}>
+                      <Text strong>
+                        {url ? (
+                          <a href={url} target="_blank" rel="noopener noreferrer">
+                            {title ?? `Record ${index + 1}`}
+                          </a>
+                        ) : (
+                          title ?? `Record ${index + 1}`
+                        )}
+                      </Text>
+                      {metaParts.length > 0 && (
+                        <Text type="secondary">{metaParts.join(' • ')}</Text>
+                      )}
+                    </Space>
+                  </List.Item>
+                );
+              }}
             />
           )}
           {triples && triples.length > 0 && (

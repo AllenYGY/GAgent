@@ -9,6 +9,7 @@ from .database_query import database_query_tool
 from .file_operations import file_operations_tool
 from .internal_api import internal_api_tool
 from .graph_rag import graph_rag_tool
+from .springer_nature import springer_nature_tool
 from .web_search import web_search_tool
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "database_query_tool",
     "internal_api_tool",
     "graph_rag_tool",
+    "springer_nature_tool",
 ]

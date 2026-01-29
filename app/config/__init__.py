@@ -17,6 +17,11 @@ from .rag_config import (
     reset_graph_rag_settings_cache,
 )
 from .search_config import SearchSettings, get_search_settings, reset_search_settings_cache
+from .springer_config import (
+    SpringerSettings,
+    get_springer_settings,
+    reset_springer_settings_cache,
+)
 
 __all__ = [
     "DatabaseConfig",
@@ -31,4 +36,7 @@ __all__ = [
     "SearchSettings",
     "get_search_settings",
     "reset_search_settings_cache",
+    "SpringerSettings",
+    "get_springer_settings",
+    "reset_springer_settings_cache",
 ]

@@ -280,7 +280,8 @@ def render_prompt(template: str, topic: PlanTopic) -> str:
     desc = _esc(topic.description or "")
     # Use simple replace to avoid recursion issues with str.format
     return (
-        template.replace("{title}", title)
+        template
+        .replace("{title}", title)
         .replace("{goal}", goal)
         .replace("{description}", desc)
     )
@@ -534,7 +535,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         model=args.model,
         timeout=args.timeout,
     )
-    print(f"[INFO] Using provider={client.provider}, model={client.model}, url={client.url}")
+    print(
+        f"[INFO] Using provider={client.provider}, model={client.model}, url={client.url}"
+    )
     print(f"[INFO] Loaded {len(topics)} topics from {args.input}")
 
     results: List[PlanResult] = []

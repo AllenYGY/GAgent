@@ -71,7 +71,15 @@ const normalizeToolResultPayload = (raw: any): ToolResultPayload | null => {
     typeof result.total_results === 'number' && Number.isFinite(result.total_results)
       ? result.total_results
       : undefined;
+  const recordCount =
+    typeof result.record_count === 'number' && Number.isFinite(result.record_count)
+      ? result.record_count
+      : undefined;
   const searchEngine = isNonEmptyString(result.search_engine) ? result.search_engine : undefined;
+  const api = isNonEmptyString(result.api) ? result.api : undefined;
+  const fallbackReason = isNonEmptyString(result.fallback_reason) ? result.fallback_reason : undefined;
+  const originalQuery = isNonEmptyString(result.original_query) ? result.original_query : undefined;
+  const recordsPreview = Array.isArray(result.records_preview) ? result.records_preview : undefined;
   const success =
     typeof result.success === 'boolean'
       ? result.success
@@ -91,6 +99,11 @@ const normalizeToolResultPayload = (raw: any): ToolResultPayload | null => {
       ...(answer ? { answer } : {}),
       ...(error ? { error } : {}),
       ...(totalResults !== undefined ? { total_results: totalResults } : {}),
+      ...(recordCount !== undefined ? { record_count: recordCount } : {}),
+      ...(api ? { api } : {}),
+      ...(fallbackReason ? { fallback_reason: fallbackReason } : {}),
+      ...(originalQuery ? { original_query: originalQuery } : {}),
+      ...(recordsPreview ? { records_preview: recordsPreview } : {}),
       ...(result.results ? { results: sanitizeResultItems(result.results) } : {}),
     },
   };

@@ -9,7 +9,7 @@ import json
 import math
 from collections import Counter
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 
 
 def _collect_delays(run_dir: Path) -> Tuple[Counter[int], List[int], int]:
@@ -30,7 +30,9 @@ def _collect_delays(run_dir: Path) -> Tuple[Counter[int], List[int], int]:
             if alignment != "misaligned":
                 continue
             delay = None
-            for offset, (_, next_alignment) in enumerate(alignments[idx + 1 :], start=1):
+            for offset, (_, next_alignment) in enumerate(
+                alignments[idx + 1 :], start=1
+            ):
                 if next_alignment == "aligned":
                     delay = offset
                     break
@@ -93,7 +95,7 @@ def _plot_svg(counter: Counter[int], *, output_path: Path) -> None:
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        '<style>text { font-family: Arial, sans-serif; }</style>',
+        "<style>text { font-family: Arial, sans-serif; }</style>",
         '<text x="250" y="30" text-anchor="middle" font-size="20">Recovery delays</text>',
     ]
     cx, cy, r = width / 2, height / 2 + 10, 160
@@ -154,10 +156,19 @@ def _plot(counter: Counter[int], *, output: Path) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot recovery time after misalignment.")
+    parser = argparse.ArgumentParser(
+        description="Plot recovery time after misalignment."
+    )
     parser.add_argument("--run-dir", help="Directory with run JSON logs (action mode).")
-    parser.add_argument("--matrix", help="Misalignment matrix CSV (from plot_misalignment_distribution --matrix-output).")
-    parser.add_argument("--output", default="experiments/misalignment_recovery.png", help="Output image path.")
+    parser.add_argument(
+        "--matrix",
+        help="Misalignment matrix CSV (from plot_misalignment_distribution --matrix-output).",
+    )
+    parser.add_argument(
+        "--output",
+        default="experiments/misalignment_recovery.png",
+        help="Output image path.",
+    )
     args = parser.parse_args()
 
     counter: Counter[int]
@@ -176,7 +187,9 @@ def main() -> None:
         counter, delays, unresolved = _collect_delays(run_dir)
 
     if not delays and unresolved == 0:
-        print("[WARN] No recoveries detected (either no misalignments or never realigned).")
+        print(
+            "[WARN] No recoveries detected (either no misalignments or never realigned)."
+        )
         return
 
     saved = _plot(counter, output=Path(args.output))
