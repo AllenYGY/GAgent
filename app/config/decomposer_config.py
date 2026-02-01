@@ -22,7 +22,7 @@ class DecomposerSettings:
     stop_on_empty: bool = True
     retry_limit: int = 1
     allow_existing_children: bool = False
-    enable_web_search: bool = True
+    enable_web_search: bool = False
 
 
 @lru_cache(maxsize=1)

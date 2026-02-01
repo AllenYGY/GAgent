@@ -182,6 +182,10 @@ class PlanDecomposer:
         "You are a search decision assistant. Decide whether web search is required "
         "to decompose the target node into actionable subtasks. Return only JSON."
     )
+    NODE_ENRICH_HEADER = (
+        "You are a plan enrichment assistant. Use web context to improve an existing "
+        "task node without changing the plan structure. Return only JSON."
+    )
 
     def __init__(
         self,
@@ -207,6 +211,8 @@ class PlanDecomposer:
         outline: str,
         depth: int,
         max_depth: int,
+        parent_web_context: Optional[str] = None,
+        current_web_context: Optional[str] = None,
     ) -> str:
         if node is None:
             node_title = plan.title
@@ -223,33 +229,53 @@ class PlanDecomposer:
             self.SEARCH_DECISION_HEADER,
             "\n=== PLAN OVERVIEW ===",
             outline or "(empty plan)",
-            "\n=== TARGET NODE ===",
-            f"Name: {node_title}",
-            f"Instruction: {node_instruction}",
-            f"Path: {node_path}",
-            f"Depth: {depth} (max {max_depth})",
-            f"Existing children count: {len(node_children)}",
-            *node_children,
-            "\n=== RESPONSE FORMAT ===",
-            "{",
-            '  "use_search": <true|false>,',
-            '  "query": "<string>"',
-            "}",
-            "\nSTRICT REQUIREMENTS:",
-            "- Return only valid JSON (no Markdown, no extra keys).",
-            "- Use search only if external info is needed to decompose the node.",
-            "- If use_search is false, set query to an empty string.",
-            "- Keep query concise (<= 120 characters).",
-            "\nQUERY GUIDELINES (when use_search=true):",
-            "- Query MUST include:",
-            "  (1) target entity/domain,",
-            "  (2) task type or method,",
-            "  (3) at least one constraint (data type/platform/threshold/species),",
-            "  (4) intended output (protocol/parameters/tool).",
-            "- Prefer using concrete terms from node name/instruction.",
-            "- Avoid generic queries (no single-word queries).",
-            "- Aim for 4–8 keywords, compact but specific.",
         ]
+        if parent_web_context:
+            prompt.extend(
+                [
+                    "\n=== PARENT WEB CONTEXT (SUMMARY) ===",
+                    parent_web_context,
+                ]
+            )
+        if current_web_context:
+            prompt.extend(
+                [
+                    "\n=== CURRENT NODE WEB CONTEXT (SUMMARY) ===",
+                    current_web_context,
+                ]
+            )
+        prompt.extend(
+            [
+                "\n=== TARGET NODE ===",
+                f"Name: {node_title}",
+                f"Instruction: {node_instruction}",
+                f"Path: {node_path}",
+                f"Depth: {depth} (max {max_depth})",
+                f"Existing children count: {len(node_children)}",
+                *node_children,
+                "\n=== RESPONSE FORMAT ===",
+                "{",
+                '  "use_search": <true|false>,',
+                '  "query": "<string>"',
+                "}",
+                "\nSTRICT REQUIREMENTS:",
+                "- Return only valid JSON (no Markdown, no extra keys).",
+                "- Use search only if external info is needed to decompose the node.",
+                "- Search is for gap-filling (missing tools/versions/parameters/metrics/thresholds/data sources), not repetition.",
+                "- If parent/current web context already covers the needed details, set use_search=false.",
+                "- If use_search is false, set query to an empty string.",
+                "- Keep query concise (<= 120 characters).",
+                "\nQUERY GUIDELINES (when use_search=true):",
+                "- Query MUST include:",
+                "  (1) target entity/domain,",
+                "  (2) task type or method,",
+                "  (3) at least one constraint (data type/platform/threshold/species),",
+                "  (4) intended output (protocol/parameters/tool).",
+                "- Prefer using concrete terms from node name/instruction.",
+                "- Avoid generic queries (no single-word queries).",
+                "- Aim for 4–8 keywords, compact but specific.",
+            ]
+        )
         return "\n".join(prompt)
 
     @staticmethod
@@ -266,6 +292,29 @@ class PlanDecomposer:
         if len(query) > 120:
             query = query[:120].strip()
         return SearchDecision(use_search=True, query=query)
+
+    @staticmethod
+    def _normalize_context_sections(
+        raw_sections: Any,
+    ) -> List[Dict[str, Any]]:
+        if not isinstance(raw_sections, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for index, item in enumerate(raw_sections, start=1):
+            if item is None:
+                continue
+            if isinstance(item, dict):
+                title = item.get("title")
+                content = item.get("content")
+                normalized.append(
+                    {
+                        "title": str(title).strip() if title is not None else f"Section {index}",
+                        "content": str(content).strip() if content is not None else "",
+                    }
+                )
+            else:
+                normalized.append({"title": f"Section {index}", "content": str(item).strip()})
+        return normalized
 
     @staticmethod
     def _format_web_context(
@@ -313,8 +362,6 @@ class PlanDecomposer:
         if query:
             lines.append(f"Query: {query}")
         if summary:
-            if len(summary) > 800:
-                summary = summary[:797] + "..."
             lines.append("Key findings:")
             lines.append(f"- {summary}")
         if results:
@@ -335,6 +382,31 @@ class PlanDecomposer:
                 lines.append(line)
 
         return "\n".join(lines).strip(), len(results), provider
+
+    @staticmethod
+    def _collect_node_web_context(node: Optional[PlanNode]) -> Optional[str]:
+        if node is None:
+            return None
+        lines: List[str] = []
+        for sec in node.context_sections or []:
+            if not isinstance(sec, dict):
+                continue
+            title = str(sec.get("title") or "").strip().lower()
+            content = str(sec.get("content") or "").strip()
+            if not content:
+                continue
+            if title.startswith("web"):
+                lines.append(content)
+        context = "\n\n".join(lines).strip()
+        return context or None
+
+    def _collect_parent_web_context(
+        self, tree: PlanTree, node: Optional[PlanNode]
+    ) -> Optional[str]:
+        if node is None or node.parent_id is None:
+            return None
+        parent = tree.nodes.get(node.parent_id)
+        return self._collect_node_web_context(parent)
 
     def _apply_web_context(
         self,
@@ -365,6 +437,261 @@ class PlanDecomposer:
         )
         tree.nodes[updated.id] = updated
 
+    def _build_node_enrichment_prompt(
+        self,
+        *,
+        plan: PlanTree,
+        node: PlanNode,
+        outline: str,
+        parent_web_context: Optional[str],
+        current_web_context: Optional[str],
+        new_web_context: Optional[str],
+        search_query: Optional[str],
+        provider: Optional[str],
+        results_count: Optional[int],
+    ) -> str:
+        context_payload = {
+            "combined": node.context_combined,
+            "sections": node.context_sections or [],
+            "meta": node.context_meta or {},
+        }
+        prompt = [
+            self.NODE_ENRICH_HEADER,
+            "\n=== PLAN OVERVIEW ===",
+            outline or "(empty plan)",
+        ]
+        if parent_web_context:
+            prompt.extend(
+                [
+                    "\n=== PARENT WEB CONTEXT ===",
+                    parent_web_context,
+                ]
+            )
+        if current_web_context:
+            prompt.extend(
+                [
+                    "\n=== CURRENT NODE WEB CONTEXT ===",
+                    current_web_context,
+                ]
+            )
+        if new_web_context:
+            prompt.extend(
+                [
+                    "\n=== NEW WEB CONTEXT ===",
+                    new_web_context,
+                ]
+            )
+        prompt.extend(
+            [
+                "\n=== TARGET NODE ===",
+                f"ID: {node.id}",
+                f"Name: {node.name}",
+                f"Instruction: {node.instruction or ''}",
+                f"Dependencies: {node.dependencies}",
+                "\n=== EXISTING CONTEXT (JSON) ===",
+                json.dumps(context_payload, ensure_ascii=False),
+                "\n=== EXISTING METADATA (JSON) ===",
+                json.dumps(node.metadata or {}, ensure_ascii=False),
+                "\n=== OUTPUT FORMAT ===",
+                "{",
+                '  "name": "<string>",',
+                '  "instruction": "<string>",',
+                '  "metadata": { "<key>": "<value>" },',
+                '  "dependencies": [<int>],',
+                '  "context": {',
+                '     "combined": "<string>",',
+                '     "sections": [',
+                '        { "title": "<string>", "content": "<string>" }',
+                "     ],",
+                '     "meta": { "<key>": "<value>" }',
+                "  }",
+                "}",
+                "\nSTRICT REQUIREMENTS:",
+                "- Return only valid JSON (no Markdown, no extra keys).",
+                "- Only update these fields: name, instruction, metadata, dependencies, context.*",
+                "- Do NOT add/remove nodes or change structure (id/parent/path/position/depth stay unchanged).",
+                "- Use parent/current web context to avoid repeating the same facts.",
+                "- New web context should fill gaps (tools/versions/parameters/metrics/thresholds/data sources).",
+                "- If using new web context, include a 'web_search' section in context.sections.",
+                "- Keep summaries concise; do not paste long quotes.",
+                "- Instruction must remain a minimal executable unit; it may include up to 2 tightly coupled micro-actions only if they lead to one explicit output.",
+                "- If the output artifact is missing, add it explicitly in the instruction (e.g., '... -> output: <file/table/model>').",
+                "- Do NOT merge distinct phases (preprocess + train + evaluate) or multiple outputs/tools into one node.",
+                "- context.combined MUST include: Why (rationale), Assumption/Constraint, and Metric/Validation (if available). Keep to 1–3 sentences.",
+                "- Prefer concrete parameters/metrics from web context; if unknown, say what is missing.",
+                "- If a field does not need changes, return the original value.",
+            ]
+        )
+        if search_query:
+            prompt.append(f"\nSearch query: {search_query}")
+        if provider:
+            prompt.append(f"Search provider: {provider}")
+        if results_count is not None:
+            prompt.append(f"Search results count: {results_count}")
+        return "\n".join(prompt)
+
+    def _parse_node_update(self, raw: Any) -> Dict[str, Any]:
+        parsed = parse_json_obj("" if raw is None else str(raw))
+        if not isinstance(parsed, dict):
+            return {}
+        update: Dict[str, Any] = {}
+
+        if "name" in parsed and isinstance(parsed.get("name"), str):
+            name = parsed.get("name", "").strip()
+            if name:
+                update["name"] = name
+        if "instruction" in parsed and isinstance(parsed.get("instruction"), str):
+            instruction = parsed.get("instruction", "").strip()
+            if instruction:
+                update["instruction"] = instruction
+
+        if "metadata" in parsed and isinstance(parsed.get("metadata"), dict):
+            update["metadata"] = parsed.get("metadata")
+        if "dependencies" in parsed and isinstance(parsed.get("dependencies"), list):
+            update["dependencies"] = parsed.get("dependencies")
+
+        context = parsed.get("context") if isinstance(parsed.get("context"), dict) else {}
+        if "context_combined" in parsed:
+            context_combined = parsed.get("context_combined")
+        else:
+            context_combined = context.get("combined")
+        if isinstance(context_combined, str) and context_combined.strip():
+            update["context_combined"] = context_combined.strip()
+
+        if "context_sections" in parsed:
+            sections_raw = parsed.get("context_sections")
+        else:
+            sections_raw = context.get("sections")
+        if sections_raw is not None:
+            sections = self._normalize_context_sections(sections_raw)
+            if sections:
+                update["context_sections"] = sections
+
+        if "context_meta" in parsed and isinstance(parsed.get("context_meta"), dict):
+            update["context_meta"] = parsed.get("context_meta")
+        else:
+            if isinstance(context.get("meta"), dict) and context.get("meta"):
+                update["context_meta"] = context.get("meta")
+
+        return update
+
+    def _apply_node_update(
+        self,
+        *,
+        plan_id: int,
+        node: PlanNode,
+        tree: PlanTree,
+        update: Dict[str, Any],
+        web_context: Optional[str],
+        query: Optional[str],
+        provider: Optional[str],
+        results_count: Optional[int],
+    ) -> Optional[PlanNode]:
+        if not update and not web_context:
+            return None
+
+        name = update.get("name") or node.name
+        instruction = update.get("instruction") or node.instruction
+
+        metadata = None
+        if "metadata" in update and isinstance(update.get("metadata"), dict):
+            merged = dict(node.metadata or {})
+            merged.update(update.get("metadata") or {})
+            metadata = merged
+
+        deps = None
+        if "dependencies" in update and isinstance(update.get("dependencies"), list):
+            filtered: List[int] = []
+            for value in update.get("dependencies") or []:
+                try:
+                    dep_id = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if dep_id == node.id:
+                    continue
+                if dep_id not in tree.nodes:
+                    continue
+                if dep_id not in filtered:
+                    filtered.append(dep_id)
+            deps = filtered
+        if deps is not None and metadata is None:
+            metadata = dict(node.metadata or {})
+
+        context_combined = None
+        if "context_combined" in update:
+            context_combined = update.get("context_combined")
+
+        sections = None
+        meta = None
+
+        if "context_sections" in update:
+            sections = list(update.get("context_sections") or [])
+        if "context_meta" in update and isinstance(update.get("context_meta"), dict):
+            meta = dict(update.get("context_meta") or {})
+
+        if web_context:
+            if sections is None:
+                sections = list(node.context_sections or [])
+            has_web_section = False
+            for sec in sections:
+                if not isinstance(sec, dict):
+                    continue
+                title = str(sec.get("title") or "").strip().lower()
+                content = str(sec.get("content") or "")
+                if title.startswith("web") and web_context in content:
+                    has_web_section = True
+                    break
+            if not has_web_section:
+                sections.append({"title": "web_search", "content": web_context})
+
+            meta = dict(node.context_meta or {})
+            if "context_meta" in update and isinstance(update.get("context_meta"), dict):
+                meta.update(update.get("context_meta") or {})
+            meta["web_search"] = {
+                "query": query,
+                "provider": provider,
+                "results_count": results_count or 0,
+            }
+
+        updated = self._repo.update_task(
+            plan_id,
+            node.id,
+            name=name,
+            instruction=instruction,
+            metadata=metadata,
+            dependencies=deps if deps is not None else None,
+            context_combined=context_combined,
+            context_sections=sections,
+            context_meta=meta,
+        )
+        tree.nodes[updated.id] = updated
+        return updated
+
+    def _count_enrich_targets(
+        self, tree: PlanTree, queue: Deque[QueueItem], max_depth: int
+    ) -> int:
+        seen: set[int] = set()
+        work: Deque[QueueItem] = deque(queue)
+        while work:
+            current = work.popleft()
+            if current.relative_depth > max_depth:
+                continue
+            node_id = current.node_id
+            if node_id is None:
+                continue
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            if current.relative_depth < max_depth:
+                for child_id in tree.children_ids(node_id):
+                    work.append(
+                        QueueItem(
+                            node_id=child_id,
+                            relative_depth=current.relative_depth + 1,
+                        )
+                    )
+        return len(seen)
+
     def run_plan(
         self,
         plan_id: int,
@@ -372,11 +699,29 @@ class PlanDecomposer:
         max_depth: Optional[int] = None,
         node_budget: Optional[int] = None,
         allow_web_search: Optional[bool] = None,
+        web_enrich_only: Optional[bool] = None,
     ) -> DecompositionResult:
         """Decompose an entire plan by traversing from the plan root."""
         tree = self._repo.get_plan_tree(plan_id)
         queue: Deque[QueueItem] = deque()
+        enrich_only = bool(web_enrich_only)
         if tree.is_empty():
+            if enrich_only:
+                return DecompositionResult(
+                    plan_id=plan_id,
+                    mode="web_enrich_only",
+                    root_node_id=None,
+                    processed_nodes=[],
+                    created_tasks=[],
+                    failed_nodes=[],
+                    stopped_reason="empty_plan",
+                    stats={
+                        "node_budget": node_budget or self._settings.total_node_budget,
+                        "consumed_budget": 0,
+                        "queue_remaining": 0,
+                        "llm_calls": 0,
+                    },
+                )
             # Use None to represent virtual plan root so LLM can produce top-level tasks.
             queue.append(QueueItem(node_id=None, relative_depth=0))
         else:
@@ -386,7 +731,7 @@ class PlanDecomposer:
         return self._process_queue(
             plan_id,
             tree=tree,
-            mode="plan_bfs",
+            mode="web_enrich_only" if enrich_only else "plan_bfs",
             queue=queue,
             max_depth=max_depth if max_depth is not None else self._settings.max_depth,
             node_budget=node_budget
@@ -394,6 +739,7 @@ class PlanDecomposer:
             else self._settings.total_node_budget,
             root_reference=root_reference,
             allow_web_search=allow_web_search,
+            override_allow_existing_children=True if enrich_only else None,
         )
 
     def decompose_node(
@@ -405,6 +751,7 @@ class PlanDecomposer:
         node_budget: Optional[int] = None,
         allow_existing_children: Optional[bool] = None,
         allow_web_search: Optional[bool] = None,
+        web_enrich_only: Optional[bool] = None,
     ) -> DecompositionResult:
         """Decompose a specific node and optionally continue BFS under it."""
         tree = self._repo.get_plan_tree(plan_id)
@@ -413,20 +760,21 @@ class PlanDecomposer:
         depth_limit = (
             expand_depth if expand_depth is not None else self._settings.max_depth
         )
+        enrich_only = bool(web_enrich_only)
         queue: Deque[QueueItem] = deque([QueueItem(node_id=node_id, relative_depth=0)])
         root_reference = node_id
         return self._process_queue(
             plan_id,
             tree=tree,
-            mode="single_node",
+            mode="web_enrich_only" if enrich_only else "single_node",
             queue=queue,
             max_depth=depth_limit,
             node_budget=node_budget
             if node_budget is not None
             else self._settings.total_node_budget,
-            override_allow_existing_children=allow_existing_children,
             root_reference=root_reference,
             allow_web_search=allow_web_search,
+            override_allow_existing_children=True if enrich_only else allow_existing_children,
         )
 
     # ------------------------------------------------------------------
@@ -453,6 +801,12 @@ class PlanDecomposer:
         budget_remaining = max(node_budget, 0)
         llm_calls = 0
         stopped_reason: Optional[str] = None
+        enrich_only = mode == "web_enrich_only"
+        enriched_nodes = 0
+        total_targets = (
+            self._count_enrich_targets(tree, queue, max_depth) if enrich_only else 0
+        )
+        processed_count = 0
 
         if budget_remaining == 0:
             return DecompositionResult(
@@ -480,6 +834,8 @@ class PlanDecomposer:
             if allow_web_search is None
             else allow_web_search
         )
+        if enrich_only:
+            allow_existing = True
 
         while queue and budget_remaining > 0:
             current = queue.popleft()
@@ -487,6 +843,8 @@ class PlanDecomposer:
                 continue
 
             node = tree.nodes.get(current.node_id) if current.node_id else None
+            if enrich_only and node is None:
+                continue
             if (
                 not allow_existing
                 and node is not None
@@ -513,7 +871,28 @@ class PlanDecomposer:
                     "budget_remaining": budget_remaining,
                 },
             )
+            if enrich_only and node is not None:
+                processed_count += 1
+                logger.info(
+                    "Enrich node %s/%s (id=%s, name=%s)",
+                    processed_count,
+                    total_targets or "?",
+                    node.id,
+                    node.display_name(),
+                )
+                _log_job(
+                    "info",
+                    "Enrich node progress",
+                    {
+                        "node_id": node.id,
+                        "node_name": node.display_name(),
+                        "index": processed_count,
+                        "total": total_targets,
+                    },
+                )
             web_context: Optional[str] = None
+            parent_web_context = self._collect_parent_web_context(tree, node)
+            current_web_context = self._collect_node_web_context(node)
             if effective_allow_web_search and hasattr(self._llm, "decide_search"):
                 decision_prompt = self._build_search_decision_prompt(
                     plan=tree,
@@ -521,6 +900,8 @@ class PlanDecomposer:
                     outline=outline_cache,
                     depth=current.relative_depth,
                     max_depth=max_depth,
+                    parent_web_context=parent_web_context,
+                    current_web_context=current_web_context,
                 )
                 try:
                     raw_decision = self._llm.decide_search(decision_prompt)
@@ -547,6 +928,8 @@ class PlanDecomposer:
                         "query": decision.query or "",
                     },
                 )
+                provider = None
+                results_count = 0
                 if decision.use_search and decision.query:
                     try:
                         payload = run_async(
@@ -573,7 +956,7 @@ class PlanDecomposer:
                         web_context, results_count, provider = self._format_web_context(
                             payload, query=decision.query
                         )
-                        if web_context:
+                        if web_context and not enrich_only:
                             self._apply_web_context(
                                 plan_id=plan_id,
                                 node=node,
@@ -603,12 +986,90 @@ class PlanDecomposer:
                                 "error": payload.get("error"),
                             },
                         )
+                if enrich_only:
+                    if web_context and node is not None:
+                        enrich_prompt = self._build_node_enrichment_prompt(
+                            plan=tree,
+                            node=node,
+                            outline=outline_cache,
+                            parent_web_context=parent_web_context,
+                            current_web_context=current_web_context,
+                            new_web_context=web_context,
+                            search_query=decision.query,
+                            provider=provider,
+                            results_count=results_count,
+                        )
+                        try:
+                            raw_update = self._llm.enrich_node(enrich_prompt)
+                            update_payload = self._parse_node_update(raw_update)
+                            updated = self._apply_node_update(
+                                plan_id=plan_id,
+                                node=node,
+                                tree=tree,
+                                update=update_payload,
+                                web_context=web_context,
+                                query=decision.query,
+                                provider=provider,
+                                results_count=results_count,
+                            )
+                            if updated:
+                                enriched_nodes += 1
+                            llm_calls += 1
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.exception(
+                                "Node enrichment failed for node %s: %s",
+                                current.node_id,
+                                exc,
+                            )
+                            _log_job(
+                                "error",
+                                "Node enrichment failed",
+                                {"node_id": current.node_id, "error": str(exc)},
+                            )
+                            if web_context:
+                                self._apply_web_context(
+                                    plan_id=plan_id,
+                                    node=node,
+                                    tree=tree,
+                                    context=web_context,
+                                    query=decision.query,
+                                    provider=provider,
+                                    results_count=results_count,
+                                )
+                                enriched_nodes += 1
+                    processed.append(current.node_id)
+                    budget_remaining -= 1
+                    if node is not None and current.relative_depth < max_depth:
+                        for child_id in tree.children_ids(node.id):
+                            if budget_remaining <= 0:
+                                break
+                            queue.append(
+                                QueueItem(
+                                    node_id=child_id,
+                                    relative_depth=current.relative_depth + 1,
+                                )
+                            )
+                    continue
             elif effective_allow_web_search:
                 _log_job(
                     "debug",
                     "Search decision skipped (unsupported LLM)",
                     {"node_id": current.node_id},
                 )
+            if enrich_only:
+                processed.append(current.node_id)
+                budget_remaining -= 1
+                if node is not None and current.relative_depth < max_depth:
+                    for child_id in tree.children_ids(node.id):
+                        if budget_remaining <= 0:
+                            break
+                        queue.append(
+                            QueueItem(
+                                node_id=child_id,
+                                relative_depth=current.relative_depth + 1,
+                            )
+                        )
+                continue
             prompt = self._prompt_builder.build(
                 plan=tree,
                 node=node,
@@ -727,6 +1188,7 @@ class PlanDecomposer:
                 "consumed_budget": node_budget - budget_remaining,
                 "queue_remaining": len(queue),
                 "llm_calls": llm_calls,
+                "enriched_nodes": enriched_nodes,
             },
         )
 

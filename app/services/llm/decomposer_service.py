@@ -210,3 +210,7 @@ class PlanDecomposerLLMService:
     def decide_search(self, prompt: str) -> str:
         """Return raw LLM output for search decision prompts."""
         return self._llm.chat(prompt, model=self._settings.model)
+
+    def enrich_node(self, prompt: str) -> str:
+        """Return raw LLM output for node enrichment prompts."""
+        return self._llm.chat(prompt, model=self._settings.model)
