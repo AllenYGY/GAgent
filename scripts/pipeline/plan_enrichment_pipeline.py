@@ -24,7 +24,9 @@ from dotenv import find_dotenv, load_dotenv  # noqa: E402
 
 from app.database import init_db  # noqa: E402
 from app.repository.plan_repository import PlanRepository  # noqa: E402
+from app.services.plans.action_executor import ActionExecutor  # noqa: E402
 from app.services.plans.plan_decomposer import PlanDecomposer  # noqa: E402
+from app.services.plans.plan_refactor import PlanRefactor, RefactorLLMConfig  # noqa: E402
 
 # --- In-script defaults (override via env) -----------------------------------
 DEFAULT_DB_ROOT = "data/databases_deepseek_web_enrich_from_deepseek_v2"
@@ -34,6 +36,13 @@ DEFAULT_TITLE_PREFIX = "Imported"
 DEFAULT_ALLOW_WEB_SEARCH = True
 DEFAULT_MAX_DEPTH = None
 DEFAULT_NODE_BUDGET = None
+DEFAULT_REFACTOR_ALLOWLIST = [
+    "create_task",
+    "update_task",
+    "move_task",
+    "delete_task",
+    "decompose_task",
+]
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -51,6 +60,23 @@ def _env_optional_int(name: str, default: Optional[int]) -> Optional[int]:
         return int(raw)
     except ValueError:
         return default
+
+
+def _env_optional_float(name: str, default: Optional[float]) -> Optional[float]:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_list(name: str, default: List[str]) -> List[str]:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def load_plan_tree(path: Path) -> Dict:
@@ -197,12 +223,44 @@ def main() -> None:
     allow_web_search = _env_bool("ENRICH_ALLOW_WEB_SEARCH", DEFAULT_ALLOW_WEB_SEARCH)
     max_depth = _env_optional_int("ENRICH_MAX_DEPTH", DEFAULT_MAX_DEPTH)
     node_budget = _env_optional_int("ENRICH_NODE_BUDGET", DEFAULT_NODE_BUDGET)
+    enable_refactor = _env_bool("ENRICH_ENABLE_REFACTOR", False)
+    refactor_max_actions = _env_optional_int("REFACTOR_MAX_ACTIONS", 25) or 25
+    refactor_allowlist = _env_list(
+        "REFACTOR_ACTION_ALLOWLIST", DEFAULT_REFACTOR_ALLOWLIST
+    )
+    refactor_allow_delete_subtree = _env_bool(
+        "REFACTOR_ALLOW_DELETE_SUBTREE", False
+    )
+    refactor_decompose_allow_web_search = _env_bool(
+        "REFACTOR_DECOMPOSE_ALLOW_WEB_SEARCH", False
+    )
+    refactor_provider = os.getenv("REFACTOR_PROVIDER")
+    refactor_model = os.getenv("REFACTOR_MODEL")
+    refactor_api_url = os.getenv("REFACTOR_API_URL")
+    refactor_api_key = os.getenv("REFACTOR_API_KEY")
+    refactor_temperature = _env_optional_float("REFACTOR_TEMPERATURE", None)
+    refactor_log_dir = os.getenv("REFACTOR_LOG_DIR")
 
     os.environ["DB_ROOT"] = db_root
 
     init_db()
     repo = PlanRepository()
     decomposer = PlanDecomposer(repo=repo)
+    action_executor = ActionExecutor(repo=repo, plan_decomposer=decomposer)
+    refactor = None
+    if enable_refactor:
+        llm_config = RefactorLLMConfig(
+            provider=refactor_provider,
+            model=refactor_model,
+            api_url=refactor_api_url,
+            api_key=refactor_api_key,
+            temperature=refactor_temperature,
+        )
+        refactor = PlanRefactor(
+            repo=repo,
+            action_executor=action_executor,
+            llm_config=llm_config,
+        )
 
     if input_path.is_dir():
         files = sorted(input_path.glob("plan_*.json"))
@@ -250,6 +308,41 @@ def main() -> None:
             )
         except Exception as exc:
             print(f"[ERR] Enrich failed for plan #{plan_id}: {exc}", file=sys.stderr)
+
+        if enable_refactor and refactor is not None:
+            print(f"[INFO] Refactoring plan #{plan_id} with ACTIONs...")
+            try:
+                started = time.perf_counter()
+                log_dir = (
+                    Path(refactor_log_dir)
+                    if refactor_log_dir
+                    else output_dir / "refactor_logs"
+                )
+                result = refactor.run(
+                    plan_id,
+                    allowlist=refactor_allowlist,
+                    max_actions=refactor_max_actions,
+                    allow_delete_subtree=refactor_allow_delete_subtree,
+                    allow_decompose_web_search=refactor_decompose_allow_web_search,
+                    model=refactor_model,
+                    temperature=refactor_temperature,
+                    log_dir=log_dir,
+                )
+                elapsed = time.perf_counter() - started
+                success_count = sum(1 for r in result.results if r.success)
+                failed_count = sum(1 for r in result.results if not r.success)
+                print(
+                    f"[OK] Refactor plan #{plan_id} "
+                    f"(actions={len(result.actions)}, "
+                    f"dropped={result.dropped_count}, "
+                    f"success={success_count}, failed={failed_count}, "
+                    f"elapsed={elapsed:.1f}s)"
+                )
+            except Exception as exc:
+                print(
+                    f"[ERR] Refactor failed for plan #{plan_id}: {exc}",
+                    file=sys.stderr,
+                )
 
     print("\n[INFO] Dumping enriched plans...")
     for _, plan_id in created:

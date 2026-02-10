@@ -266,11 +266,30 @@ Chat agent plan:
 {agent_plan}
 """
 
-DEFAULT_FULL_PLAN_CHAT_PROMPT = """You are a planning assistant. Given a current plan, recent agent plans (if any), and the goal, produce an improved full plan as strict JSON only.
-- Do NOT include code fences or extra text.
-- Include tasks with fields: id (int), name, instruction, parent_id (null for roots), dependencies (id list), status ("pending"), position (int order).
-- Keep dependencies consistent; parent_id must reference defined tasks or null for roots.
-- Aim to make the plan clearer, more complete, and executable. Depth ≤3, total tasks ≤30.
+FULL_PLAN_SCHEMA = """PlanTree-compatible JSON schema:
+{
+  "plan_id": "<int or empty>",
+  "title": "<short title>",
+  "description": "<short description>",
+  "tasks": [
+    {
+      "id": <int unique>,
+      "name": "<task name>",
+      "instruction": "<actionable steps>",
+      "status": "pending",
+      "parent_id": <int or null>,
+      "position": <int order within siblings>,
+      "dependencies": [<int task ids>]
+    }
+  ]
+}
+Constraints:
+- Depth ≤3; total tasks ≤30.
+- parent_id must reference an existing task id or be null.
+- dependencies must reference existing task ids (no self-dependency).
+"""
+
+DEFAULT_FULL_PLAN_CHAT_PROMPT = """You are a planning assistant. Produce an improved full plan as strict JSON only.
 
 Goal:
 {goal}
@@ -280,14 +299,15 @@ Current plan JSON:
 
 Recent agent plans (last 10, may be empty):
 {history}
+
+Output requirements:
+- Do NOT include code fences or extra text.
+- Output must conform to the PlanTree-compatible schema below.
+
+{schema}
 """
 
-DEFAULT_FULL_PLAN_SIM_USER_PROMPT = """You are a simulated user refining a plan. Given the last agent plan (baseline) and recent agent plans, produce an updated full plan as strict JSON only.
-- Do NOT include code fences or extra text.
-- Include tasks with fields: id (int), name, instruction, parent_id (null for roots), dependencies (id list), status ("pending"), position (int order).
-- Keep dependencies consistent; parent_id must reference defined tasks or null for roots.
-- Keep depth ≤3 and total tasks ≤30. Focus on clarity and usability rather than aggressive restructuring.
-- Do NOT repeat prior changes; each turn must introduce a new, incremental improvement.
+DEFAULT_FULL_PLAN_SIM_USER_PROMPT = """You are a simulated user refining a plan. Produce an updated full plan as strict JSON only.
 
 Goal:
 {goal}
@@ -297,6 +317,14 @@ Baseline plan JSON:
 
 Recent agent plans (last 10, may be empty):
 {history}
+
+Output requirements:
+- Do NOT include code fences or extra text.
+- Output must conform to the PlanTree-compatible schema below.
+- Focus on clarity and usability rather than aggressive restructuring.
+- Do NOT repeat prior changes; each turn must introduce a new, incremental improvement.
+
+{schema}
 """
 
 
@@ -363,16 +391,30 @@ def _strip_code_fences(text: str) -> str:
     return cleaned.strip()
 
 
+def _validate_full_plan_payload(payload: Dict[str, Any]) -> None:
+    """
+    Optional (non-blocking) validation: all fields are treated as optional.
+    Intentionally no enforcement beyond JSON parsing.
+    """
+    return
+
+
 def _parse_plan_text(raw: str) -> Dict[str, Any]:
     cleaned = _strip_code_fences(raw)
     try:
-        return json.loads(cleaned)
+        payload = json.loads(cleaned)
     except json.JSONDecodeError:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
             snippet = cleaned[start : end + 1]
-            return json.loads(snippet)
+            payload = json.loads(snippet)
+        else:
+            raise
+    if not isinstance(payload, dict):
+        payload = {"raw": payload}
+    _validate_full_plan_payload(payload)
+    return payload
         raise
 
 
@@ -392,6 +434,7 @@ def _generate_agent_plan(
         goal=goal,
         baseline_plan=_load_plan_text(baseline_plan_path),
         history=history_text or "None",
+        schema=FULL_PLAN_SCHEMA,
     )
     chat_kwargs = {}
     if temperature is not None:
@@ -415,9 +458,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["action", "full_plan"],
+        choices=["action", "plan"],
         default="action",
-        help="Simulation mode: action (default, tool actions) or full_plan (direct plan JSON scoring).",
+        help="Simulation mode: action (default, tool actions) or plan (direct plan JSON scoring).",
     )
     parser.add_argument(
         "--plan-id",
@@ -456,7 +499,7 @@ def main() -> None:
     parser.add_argument(
         "--temperature",
         type=float,
-        help="Sampling temperature passed to LLM calls (full_plan mode).",
+        help="Sampling temperature passed to LLM calls (plan mode).",
     )
     parser.add_argument(
         "--max-turns",
@@ -479,7 +522,7 @@ def main() -> None:
     parser.add_argument(
         "--goal",
         default="Improve the current plan to make it clearer, more complete, and executable.",
-        help="User goal/intent for both action and full_plan modes (default: improve the current plan).",
+        help="User goal/intent for both action and plan modes (default: improve the current plan).",
     )
     parser.add_argument(
         "--db-root", help="Source DB_ROOT to copy (defaults to app config / env)."
@@ -492,12 +535,12 @@ def main() -> None:
     parser.add_argument(
         "--input-plan-json",
         type=str,
-        help="In full_plan mode: file or directory of plan_*.json (PlanTree) to judge directly (skip action simulation).",
+        help="In plan mode: file or directory of plan_*.json (PlanTree) to judge directly (skip action simulation).",
     )
     parser.add_argument(
         "--full-plan-judge-prompt",
         type=Path,
-        help="Optional prompt template for full_plan judge (default internal).",
+        help="Optional prompt template for plan judge (default internal).",
     )
     parser.add_argument(
         "--full-plan-chat-prompt",
@@ -538,8 +581,8 @@ def main() -> None:
 
     if args.mode == "action" and args.plan_id is None:
         parser.error("--plan-id is required in action mode")
-    if args.mode == "full_plan" and not args.input_plan_json:
-        parser.error("--input-plan-json is required in full_plan mode")
+    if args.mode == "plan" and not args.input_plan_json:
+        parser.error("--input-plan-json is required in plan mode")
 
     source_db_root = Path(args.db_root or os.getenv("DB_ROOT", "data/databases"))
     if args.mode == "action" and not source_db_root.exists():
@@ -548,8 +591,8 @@ def main() -> None:
     output_root = (ROOT_DIR / args.output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
-    # ---------------- full_plan mode: judge alignment on plan JSON (no actions) ---------------- #
-    if args.mode == "full_plan":
+    # ---------------- plan mode: judge alignment on plan JSON (no actions) ---------------- #
+    if args.mode == "plan":
         ip = Path(args.input_plan_json)
         if ip.is_dir():
             plan_inputs = sorted(ip.glob("plan_*.json"))
@@ -560,7 +603,7 @@ def main() -> None:
 
         manifest_path = output_root / "experiment_manifest.json"
         manifest_payload = {
-            "mode": "full_plan",
+            "mode": "plan",
             "input_plan_json": str(ip),
             "runs": args.runs,
             "max_turns": args.max_turns,

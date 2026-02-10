@@ -97,6 +97,17 @@ PROVIDER_CONFIGS: Dict[str, Dict[str, Any]] = {
         "default_model": "gemini-2.5-flash",
         "endpoint_path": "/chat/completions",
     },
+    "openrouter": {
+        "api_key_env": "OPENROUTER_API_KEY",
+        "url_env": "OPENROUTER_API_URL",
+        "model_env": "OPENROUTER_MODEL",
+        "settings_api_key": "openrouter_api_key",
+        "settings_url": "openrouter_api_url",
+        "settings_model": "openrouter_model",
+        "default_url": "https://openrouter.ai/api/v1",
+        "default_model": "openai/gpt-5.2",
+        "endpoint_path": "/chat/completions",
+    },
 }
 
 DEFAULT_PROVIDER = "glm"
@@ -176,6 +187,13 @@ class LLMClient(LLMProvider):
         self.model = model or env_model or settings_model or config.get("default_model")
         self.extra_headers: Dict[str, str] = config.get("headers", {})
         self.payload_defaults: Dict[str, Any] = config.get("payload_defaults", {})
+        if self.provider == "openrouter":
+            referer = os.getenv("OPENROUTER_SITE_URL")
+            title = os.getenv("OPENROUTER_SITE_NAME")
+            if referer:
+                self.extra_headers["HTTP-Referer"] = referer
+            if title:
+                self.extra_headers["X-Title"] = title
         if not self.url:
             raise RuntimeError(f"{self.provider.upper()} base URL is not configured.")
         self.endpoint_url = _compose_endpoint(self.url, config.get("endpoint_path"))
@@ -213,13 +231,17 @@ class LLMClient(LLMProvider):
 
         if not self.api_key:
             raise RuntimeError(f"{self.provider.upper()}_API_KEY is not set in environment")
-        # Use structured content blocks to satisfy providers that require `type: text`.
-        messages = [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": prompt}],
-            }
-        ]
+        if self.provider == "openrouter":
+            # Use plain string content to match OpenRouter curl examples.
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            # Use structured content blocks to satisfy providers that require `type: text`.
+            messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": prompt}],
+                }
+            ]
         payload = {
             "model": model or self.model,
             "messages": messages,

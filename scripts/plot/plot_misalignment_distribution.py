@@ -18,7 +18,6 @@ from typing import Dict, Iterable, Tuple
 try:
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
-    from cycler import cycler
 except ModuleNotFoundError:
     print(
         "[ERROR] matplotlib is required for generating publication-quality plots.\n"
@@ -26,34 +25,7 @@ except ModuleNotFoundError:
     )
     sys.exit(1)
 
-
-def set_publication_style():
-    """
-    Sets global matplotlib rcParams for a professional, publication-ready aesthetic.
-    Focuses on serif fonts, clean layouts, and high readability.
-    """
-    plt.rcParams.update({
-        # Use serif fonts to match typical journal body text (e.g., Times New Roman)
-        "font.family": "serif",
-        "font.serif": ["Times New Roman", "Times", "DejaVu Serif", "serif"],
-        "font.size": 10,
-        # Increase readability for labels and titles
-        "axes.labelsize": 11,
-        "axes.titlesize": 12,
-        "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
-        # Heavier axes lines for definition
-        "axes.linewidth": 0.8,
-        # Cleaner legend
-        "legend.frameon": False,
-        "legend.fontsize": 9,
-        # Professional color palette (muted slate blue instead of harsh default blue)
-        "axes.prop_cycle": cycler(color=["#4E79A7", "#F28E2B", "#E15759", "#76B7B2"]),
-        # High DPI for raster output by default
-        "savefig.dpi": 300,
-        "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.05,
-    })
+from nbt_style import PALETTE, set_nature_style, soften_axes
 
 
 def collect_misalignment_turns(
@@ -148,51 +120,54 @@ def plot_distribution(
     """
     Generates a publication-quality bar chart of misalignment distribution using matplotlib.
     """
-    # Ensure style settings are applied
-    set_publication_style()
+    set_nature_style()
 
     turns: Iterable[int] = range(1, max_turns + 1)
     counts = [counter.get(turn, 0) for turn in turns]
     labels = [str(t) for t in turns]
     x_pos = list(range(len(labels)))
 
-    # Use fixed standard figure dimensions (e.g., ~7 inches wide for double-column fit)
-    # instead of dynamic sizing, to ensure consistency across publications.
-    fig, ax = plt.subplots(figsize=(7.0, 3.5))
+    fig, ax = plt.subplots(figsize=(7.0, 3.2))
 
-    # Plot bars using the defined color cycle (Slate Blue)
-    # zorder=3 ensures bars are on top of the grid.
-    bars = ax.bar(x_pos, counts, width=0.75, align="center", zorder=3)
+    bar_color = PALETTE["misaligned"]
+    bars = ax.bar(
+        x_pos,
+        counts,
+        width=0.78,
+        align="center",
+        color=bar_color,
+        edgecolor="white",
+        linewidth=0.4,
+        zorder=3,
+    )
 
     # Add count labels on top of bars if they aren't too crowded
-    if len(x_pos) < 30:
+    if len(x_pos) < 18:
         for bar in bars:
             height = bar.get_height()
             if height > 0:
                 ax.annotate(
                     f"{height}",
                     xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 2),  # 2 points vertical offset
+                    xytext=(0, 2),
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=8,
+                    fontsize=7,
+                    color=PALETTE["muted"],
                 )
 
     # Remove top and right spines for a cleaner, more modern look
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    soften_axes(ax)
 
     # Configure grid
     # Only show horizontal grid lines, make them thin, gray, and placed behind bars (zorder=0).
-    ax.yaxis.grid(
-        True, linestyle="--", which="major", color="grey", alpha=0.4, zorder=0
-    )
+    ax.yaxis.grid(True, linestyle="-", which="major", color=PALETTE["grid"], zorder=0)
     ax.xaxis.grid(False)
 
     # Axis Labels and Title
-    ax.set_xlabel("Turn Index (t)", labelpad=8)
-    ax.set_ylabel("Frequency of Misalignment", labelpad=8)
+    ax.set_xlabel("Turn", labelpad=6)
+    ax.set_ylabel("Runs", labelpad=6)
 
     # Concise title with essential N-numbers
     total_issues = sum(counts)
@@ -201,27 +176,30 @@ def plot_distribution(
         if "first" in title_suffix.lower()
         else "Total Misalignments"
     )
-    ax.set_title(
-        f"Distribution of {issue_type}\n(N={total_runs} Runs, Total Issues={total_issues})",
-        pad=15,
+    ax.set_title(f"{issue_type} by turn", pad=8)
+    ax.text(
+        0.99,
+        0.96,
+        f"N={total_runs} | Total={total_issues}",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=7,
+        color=PALETTE["muted"],
     )
 
     # X-axis Ticks Configuration
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(labels)
-
-    # If too many ticks, prevent overlap by rotating or sparsifying
-    if len(labels) > 20:
-        plt.xticks(rotation=45, ha="right")
-        # Optional: Show only every nth label if extremely crowded
-        # n = len(labels) // 20 or 1
-        # for i, label in enumerate(ax.xaxis.get_ticklabels()):
-        #     if i % n != 0: label.set_visible(False)
+    if len(labels) > 16:
+        step = max(1, len(labels) // 10)
+        tick_labels = [lab if idx % step == 0 else "" for idx, lab in enumerate(labels)]
+        ax.set_xticklabels(tick_labels)
+    else:
+        ax.set_xticklabels(labels)
 
     # Ensure integer ticks on Y-axis for counts
     ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
 
-    #  layout adjustments are handled by savefig.bbox = 'tight' in rcParams
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Recommend PDF for vector graphics in publications, fall back to high-DPI PNG
@@ -269,7 +247,7 @@ def main() -> None:
     if not run_dir.exists():
         parser.error(f"Run directory/file not found: {run_dir}")
 
-    # Decide source: CSV (full_plan results) or JSON run logs (action mode)
+    # Decide source: CSV (plan mode results) or JSON run logs (action mode)
     use_csv = False
     csv_path = run_dir
     if run_dir.is_dir():

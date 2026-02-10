@@ -4,7 +4,7 @@ Grouped bar charts by category.
 
 Inputs:
   --category-csv: CSV with at least columns `category` and `title` (e.g., data/phage_plans.csv).
-  --files: one or more plan_scores*.csv (with columns title,contextual_completeness,task_granularity_atomicity,...).
+  --files: one or more plan_scores*.csv (with columns title,contextual_completeness,accuracy,task_granularity_atomicity,reproducibility_execution,scientific_rigor,innovation_feasibility,...).
   --labels: optional labels matching --files order (otherwise inferred).
 
 Output:
@@ -39,8 +39,9 @@ METRICS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 

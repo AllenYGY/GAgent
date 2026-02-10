@@ -27,8 +27,9 @@ DIMENSIONS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 CONDITION_ORDER = [
@@ -258,6 +259,12 @@ def detect_model(label: str) -> str:
         return "DeepSeek-V3"
     if "qwen" in low:
         return "Qwen3-Max"
+    if "gemini" in low:
+        return "Gemini-3-Pro"
+    if "grok" in low:
+        return "Grok-4"
+    if "gpt52" in low or "gpt-5.2" in low or "gpt5" in low:
+        return "GPT-5.2-Chat"
     if "glm" in low:
         return "GLM"
     if "gpt" in low:
@@ -321,8 +328,9 @@ def metric_labels() -> List[str]:
         "Contextual\nCompleteness",
         "Accuracy",
         "Task\nGranularity",
-        "Reproducibility",
+        "Reproducibility\n& Execution",
         "Scientific\nRigor",
+        "Innovation\n& Feasibility",
     ]
 
 

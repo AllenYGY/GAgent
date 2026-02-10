@@ -11,8 +11,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -224,22 +225,43 @@ def dump_plan_tree(repo: PlanRepository, plan_id: int, target_dir: Path) -> Path
 
 
 def generate_plans(args: argparse.Namespace, topics: List[PlanTopic]) -> List[GenerationResult]:
-    env_path = find_dotenv(usecwd=True)
-    if env_path:
-        try:
-            load_dotenv(env_path)
-        except Exception as exc:  # pragma: no cover - best effort messaging
-            print(f"[WARN] Failed to parse {env_path}: {exc}. Check for invalid lines (e.g., ';' comments).")
-        else:
-            print(f"[INFO] Loaded environment variables from {env_path}")
+    if os.getenv("SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print("[INFO] SKIP_DOTENV set; skipping .env loading.")
     else:
-        print("[INFO] No .env file found; using default environment.")
+        env_path = find_dotenv(usecwd=True)
+        if env_path:
+            try:
+                load_dotenv(env_path)
+            except Exception as exc:  # pragma: no cover - best effort messaging
+                print(f"[WARN] Failed to parse {env_path}: {exc}. Check for invalid lines (e.g., ';' comments).")
+            else:
+                print(f"[INFO] Loaded environment variables from {env_path}")
+        else:
+            print("[INFO] No .env file found; using default environment.")
     print("[INFO] Initialising database ...")
     init_db()
     print("[INFO] Database ready. Starting plan generation...")
     def worker(topic: PlanTopic) -> GenerationResult:
         repo = PlanRepository()
-        decomposer = PlanDecomposer(repo=repo, settings=get_decomposer_settings())
+        settings = get_decomposer_settings()
+        provider = os.getenv("DECOMP_PROVIDER") or settings.provider
+        model = os.getenv("DECOMP_MODEL") or settings.model
+        api_url = os.getenv("DECOMP_API_URL") or settings.api_url
+        api_key = os.getenv("DECOMP_API_KEY") or settings.api_key
+        enable_web = os.getenv("DECOMP_ENABLE_WEB_SEARCH")
+        if enable_web is not None:
+            enable_web_search = str(enable_web).strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            enable_web_search = settings.enable_web_search
+        settings = replace(
+            settings,
+            provider=provider,
+            model=model,
+            api_url=api_url,
+            api_key=api_key,
+            enable_web_search=enable_web_search,
+        )
+        decomposer = PlanDecomposer(repo=repo, settings=settings)
         ds = decomposer.settings
         print(
             "[INFO] LLM/decomposer config: "

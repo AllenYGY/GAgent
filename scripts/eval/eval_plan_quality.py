@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-LLM-based plan quality evaluation script.
+LLM-based plan quality evaluation script (10-point rubric).
 
-Implements docs/plans/plan_quality_evaluation.md by loading plan trees,
-building an English evaluation prompt, and asking an LLM to return the six
-Likert-style scores (1–5) plus an optional comment.
+Evaluates plan trees using a per-criterion 0/1/2 checklist. The LLM returns
+criterion scores + reasons; this script computes 1–10 dimension scores by
+summing the five criteria per dimension (minimum score of 1).
 """
 
 from __future__ import annotations
@@ -64,11 +64,12 @@ DIMENSIONS: List[Dict[str, str]] = [
         ),
     },
     {
-        "key": "reproducibility_parameterization",
-        "label": "Reproducibility & Parameterization",
+        "key": "reproducibility_execution",
+        "label": "Reproducibility & Execution",
         "desc": (
-            "The extent to which the plan specifies how to run tools (parameters, "
-            "standards, formats), not just which tools to use."
+            "The extent to which the plan specifies how to run and reproduce the "
+            "workflow (tools, versions, parameters, IO, runbook, dependencies), "
+            "not just which tools to use."
         ),
     },
     {
@@ -79,12 +80,83 @@ DIMENSIONS: List[Dict[str, str]] = [
             "and reproducibility steps (e.g., documentation, validation, error analysis)."
         ),
     },
+    {
+        "key": "innovation_feasibility",
+        "label": "Innovation & Feasibility",
+        "desc": (
+            "Novelty plus practical viability under stated constraints (resources, "
+            "time, dependencies, risks)."
+        ),
+    },
 ]
 
-SCALE_GUIDE = (
-    "Use integers 1–5 only: 1 = very poor, 2 = weak/needs major fixes, "
-    "3 = acceptable baseline, 4 = strong, 5 = excellent."
-)
+CRITERIA: Dict[str, List[Tuple[str, str]]] = {
+    "contextual_completeness": [
+        (
+            "C1",
+            "At least ~60% of major steps include an explicit 'why' (rationale).",
+        ),
+        ("C2", "Rationale explicitly links steps to the plan goal."),
+        ("C3", "Key assumptions/constraints are explicitly stated."),
+        ("C4", "Ordering/sequence is explicitly justified."),
+        ("C5", "Alternatives or tradeoffs are explicitly mentioned."),
+    ],
+    "accuracy": [
+        ("A1", "Methods/tools fit the task and are explicitly justified."),
+        ("A2", "Assumptions are explicitly stated and technically plausible."),
+        ("A3", "No clear contradictions between steps."),
+        ("A4", "Tool capabilities match stated usage (no impossible steps)."),
+        ("A5", "Explicitly cites a standard/best practice."),
+    ],
+    "task_granularity_atomicity": [
+        (
+            "G1",
+            "Most steps specify one clear output artifact (file/table/model/report). A step may include 1–2 tightly coupled actions only if they lead to the same output.",
+        ),
+        (
+            "G2",
+            "Steps are minimal executable units; they do not combine distinct phases or multiple outputs/tools in a single step.",
+        ),
+        ("G3", "Almost no high-level goal-only steps remain."),
+        ("G4", "Dependencies are explicit and minimal."),
+        ("G5", "No clear redundancy or overlap across steps."),
+    ],
+    "reproducibility_execution": [
+        ("R1", "Tool name plus version/implementation is given."),
+        ("R2", "Inputs & outputs specify files/formats explicitly."),
+        ("R3", "Key parameters/thresholds/decision rules are explicit."),
+        ("R4", "Data sources or versions are explicitly identified."),
+        (
+            "R5",
+            "Execution details are explicit (commands/runbook/environment/dependencies).",
+        ),
+    ],
+    "scientific_rigor": [
+        ("S1", "Explicit QC/validation steps included."),
+        ("S2", "Explicit evaluation metrics defined (e.g., F1, N50)."),
+        ("S3", "Explicit baselines or controls specified."),
+        ("S4", "Explicit error/robustness analysis included."),
+        ("S5", "Explicit acceptance thresholds/go-no-go criteria defined."),
+    ],
+    "innovation_feasibility": [
+        (
+            "I1",
+            "Explicitly states at least one non-obvious/novel idea beyond a baseline.",
+        ),
+        ("I2", "Innovation is tied to the goal with expected benefit or impact."),
+        (
+            "I3",
+            "Feasibility under stated constraints (time/budget/compute/data access) is explicitly discussed.",
+        ),
+        (
+            "I4",
+            "Resource requirements (data, compute, people, dependencies) are explicit and realistic.",
+        ),
+        ("I5", "Risks/unknowns and mitigation or fallback are explicitly described."),
+    ],
+}
+
+SCALE_GUIDE = "Each criterion is scored 0/1/2 only."
 
 DEFAULT_PROVIDER_SEQUENCE = [
     provider
@@ -119,7 +191,7 @@ class EvaluationRecord:
     plan_id: int
     title: str
     scores: Dict[str, int]
-    rationales: Dict[str, str]
+    criteria: Dict[str, Dict[str, Dict[str, Any]]]
     comments: str
     raw: Dict[str, Any]
 
@@ -196,6 +268,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=Path,
         default=Path("results/plan_scores.jsonl"),
         help="JSONL path for raw evaluator payloads (default: results/plan_scores.jsonl).",
+    )
+    parser.add_argument(
+        "--stream-output",
+        action="store_true",
+        help="Append results after each plan (safe to interrupt; avoids losing progress).",
     )
     parser.add_argument(
         "--provider-workers",
@@ -403,23 +480,69 @@ def resolve_target_providers(args: argparse.Namespace) -> List[str]:
 
 def build_prompt(plan: PlanPayload, *, max_nodes: Optional[int]) -> str:
     outline = plan.tree.to_outline(max_nodes=max_nodes)
+    dims = DIMENSIONS
     dim_lines = [
-        f"- {dim['label']} (`{dim['key']}`): {dim['desc']}" for dim in DIMENSIONS
+        f"- {dim['label']} (`{dim['key']}`): {dim['desc']}" for dim in dims
     ]
     schema_example = {
         "plan_id": plan.plan_id,
         "title": plan.title,
-        "scores": {dim["key"]: 1 for dim in DIMENSIONS},
-        "rationales": {
-            dim["key"]: "Short rationale (<=40 words)." for dim in DIMENSIONS
+        "criteria": {
+            dim["key"]: {
+                crit_id: {"value": 0, "reason": "Short reason (<=30 words)."}
+                for crit_id, _ in CRITERIA[dim["key"]]
+            }
+            for dim in DIMENSIONS
         },
         "comments": 'Optional short overall note ("" if none).',
     }
     instructions = (
-        "You are an expert reviewer. Score each dimension using integers 1–5. "
-        "Provide a short rationale per dimension (<=40 words each). "
-        "Penalize missing information by lowering Contextual Completeness/Accuracy and mention it in rationales."
+        "You are an expert reviewer. Evaluate plan quality only (not execution). "
+        "For each criterion, output a 0/1/2 value with a short reason and evidence. "
+        "Do not infer missing details; if not stated, score 0. "
+        "If evidence is weak/implicit, score 1 (not 2)."
     )
+    scoring_method = [
+        "SCORING METHOD (applied by the evaluator script):",
+        "- Each criterion value is 0/1/2.",
+        "  0 = not stated / missing",
+        "  1 = partially implied or vague",
+        "  2 = explicitly stated with concrete evidence",
+        "- Dimension score = sum of its five criteria (0–10).",
+        "- If the sum is 0, the script reports it as 1 to keep scores in 1–10.",
+    ]
+    scorecard = [
+        "DIMENSION RUBRICS (mutually exclusive by design; only score what the dimension covers):",
+        "",
+        "contextual_completeness (ONLY rationale/why; ignore tools/parameters/QC):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["contextual_completeness"]],
+        "",
+        "accuracy (ONLY correctness/feasibility of methods/tools/assumptions; ignore missing parameters/QC):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["accuracy"]],
+        "",
+        "task_granularity_atomicity (ONLY decomposition quality; ignore rationale/parameters/QC):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["task_granularity_atomicity"]],
+        "- IMPORTANT: Do NOT give 2 just because a step starts with a verb.",
+        "- A step may include up to 2 tightly coupled micro-actions ONLY if it produces one explicit output and uses a single method/tool context.",
+        "- If a step combines distinct phases (e.g., preprocess + train + evaluate), multiple outputs, or multiple tool contexts, it is NOT atomic.",
+        "- Abstract outcomes like “insights/analysis/understanding” do NOT count as concrete outputs.",
+        "- For G1/G2=2, the reason must cite a concrete step showing a single explicit output artifact.",
+        "",
+        "reproducibility_execution (ONLY tools/parameters/IO/data sources/execution; ignore validation rigor):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["reproducibility_execution"]],
+        "",
+        "scientific_rigor (ONLY QC/validation/metrics/baselines/controls):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["scientific_rigor"]],
+        "",
+        "innovation_feasibility (ONLY novelty & practical viability; ignore correctness/parameters/QC):",
+        *[f"- {cid}: {desc}" for cid, desc in CRITERIA["innovation_feasibility"]],
+        "- IMPORTANT: Do NOT give 2 for generic buzzwords; require concrete evidence.",
+        "",
+        "EVIDENCE REQUIREMENTS:",
+        "- For each criterion, provide a short reason (<=30 words).",
+        "- Cite 1–2 concrete pieces of evidence (node IDs or steps).",
+        "- If information is missing, explicitly name what is missing.",
+    ]
     prompt = (
         f"{instructions}\n\n"
         f"Plan metadata:\n"
@@ -429,19 +552,21 @@ def build_prompt(plan: PlanPayload, *, max_nodes: Optional[int]) -> str:
         f"Plan outline:\n{outline}\n\n"
         f"Scoring dimensions:\n" + "\n".join(dim_lines) + "\n\n"
         f"{SCALE_GUIDE}\n\n"
+        + "\n".join(scoring_method)
+        + "\n\n"
+        + "\n".join(scorecard)
+        + "\n\n"
         "Return valid JSON ONLY using this schema:\n"
         f"{json.dumps(schema_example, indent=2)}\n\n"
         "Rules:\n"
         "- Utilize the most rigorous standard audit program.\n"
         "- Do not include markdown fences or commentary outside the JSON.\n"
-        "- Every score must be an integer between 1 and 5.\n"
-        "- Every rationale must be a short string (<=40 words).\n"
+        "- Every criterion must include {value, reason}.\n"
+        "- value must be 0, 1, or 2.\n"
+        "- reason must be a short string (<=30 words).\n"
         "- Keep comments under 80 words; use an empty string if there is nothing to add.\n"
     )
     return prompt
-
-
-# --- Response validation ------------------------------------------------------
 
 
 def validate_response(
@@ -449,42 +574,47 @@ def validate_response(
 ) -> Optional[EvaluationRecord]:
     if not isinstance(data, dict):
         return None
-    scores = data.get("scores")
-    if not isinstance(scores, dict):
+    raw_criteria = data.get("criteria")
+    if not isinstance(raw_criteria, dict):
         return None
+    parsed_criteria: Dict[str, Dict[str, Dict[str, Any]]] = {}
     parsed_scores: Dict[str, int] = {}
     for dim in DIMENSIONS:
-        key = dim["key"]
-        value = scores.get(key)
-        if value is None:
+        dim_key = dim["key"]
+        dim_criteria = raw_criteria.get(dim_key)
+        if not isinstance(dim_criteria, dict):
             return None
-        try:
-            value = int(value)
-        except Exception:
-            return None
-        if not (1 <= value <= 5):
-            return None
-        parsed_scores[key] = value
-    raw_rationales = (
-        data.get("rationales")
-        or data.get("rationale")
-        or data.get("reasons")
-        or data.get("justifications")
-    )
-    if not isinstance(raw_rationales, dict):
-        return None
-    parsed_rationales: Dict[str, str] = {}
-    for dim in DIMENSIONS:
-        key = dim["key"]
-        value = raw_rationales.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            value = str(value)
-        value = value.strip()
-        if not value:
-            return None
-        parsed_rationales[key] = value
+        parsed_criteria[dim_key] = {}
+        total = 0
+        for crit_id, _ in CRITERIA[dim_key]:
+            crit_payload = dim_criteria.get(crit_id)
+            if not isinstance(crit_payload, dict):
+                return None
+            value = crit_payload.get("value")
+            reason = crit_payload.get("reason")
+            try:
+                value = int(value)
+            except Exception:
+                return None
+            if value not in (0, 1, 2):
+                return None
+            if reason is None:
+                return None
+            if not isinstance(reason, str):
+                reason = str(reason)
+            reason = reason.strip()
+            if not reason:
+                return None
+            parsed_criteria[dim_key][crit_id] = {
+                "value": value,
+                "reason": reason,
+            }
+            total += value
+        if total <= 0:
+            total = 1
+        if total > 10:
+            total = 10
+        parsed_scores[dim_key] = total
     title = str(data.get("title") or plan.title)
     comments = data.get("comments")
     if comments is None:
@@ -504,13 +634,13 @@ def validate_response(
         plan_id=plan_id,
         title=title,
         scores=parsed_scores,
-        rationales=parsed_rationales,
+        criteria=parsed_criteria,
         comments=comments,
         raw={
             "plan_id": plan_id,
             "title": title,
             "scores": parsed_scores,
-            "rationales": parsed_rationales,
+            "criteria": parsed_criteria,
             "comments": comments,
         },
     )
@@ -565,8 +695,10 @@ async def evaluate_plans_async(
     provider_label: Optional[str] = None,
     model_label: Optional[str] = None,
     prompt_dir: Optional[Path] = None,
+    stream_paths: Optional[Tuple[Path, Path]] = None,
 ) -> List[EvaluationRecord]:
     semaphore = asyncio.Semaphore(max(1, args.batch_size))
+    stream_lock = asyncio.Lock() if args.stream_output and stream_paths else None
     records: List[Optional[EvaluationRecord]] = [None] * len(plans)
     failures: List[str] = []
 
@@ -578,12 +710,16 @@ async def evaluate_plans_async(
                 f"[INFO] [{label}/{model}] Evaluating plan #{plan.plan_id}: {plan.title}"
             )
             try:
-                records[index] = await score_plan(
+                record = await score_plan(
                     plan,
                     service,
                     args=args,
                     prompt_dir=prompt_dir,
                 )
+                records[index] = record
+                if args.stream_output and stream_paths:
+                    async with stream_lock:  # type: ignore[arg-type]
+                        append_record(stream_paths[0], stream_paths[1], record)
             except Exception as exc:
                 failures.append(f"Plan #{plan.plan_id}: {exc}")
 
@@ -607,9 +743,7 @@ def write_outputs(
         return
     output_path.parent.mkdir(parents=True, exist_ok=True)
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-    score_fields = [dim["key"] for dim in DIMENSIONS]
-    rationale_fields = [f"rationale_{dim['key']}" for dim in DIMENSIONS]
-    fieldnames = ["plan_id", "title"] + score_fields + rationale_fields + ["comments"]
+    fieldnames = build_fieldnames()
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -621,13 +755,54 @@ def write_outputs(
             }
             for key, value in record.scores.items():
                 row[key] = value
-            for key, value in record.rationales.items():
-                row[f"rationale_{key}"] = value
+            for dim_key, crits in record.criteria.items():
+                for crit_id, crit_payload in crits.items():
+                    row[f"{dim_key}_{crit_id}_value"] = crit_payload.get("value")
+                    row[f"{dim_key}_{crit_id}_reason"] = crit_payload.get("reason")
             writer.writerow(row)
     with jsonl_path.open("w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record.raw, ensure_ascii=False) + "\n")
     print(f"[INFO] Wrote {len(records)} evaluations to {output_path} and {jsonl_path}")
+
+
+def build_fieldnames() -> List[str]:
+    score_fields = [dim["key"] for dim in DIMENSIONS]
+    criteria_fields: List[str] = []
+    for dim in DIMENSIONS:
+        dim_key = dim["key"]
+        for crit_id, _ in CRITERIA[dim_key]:
+            criteria_fields.append(f"{dim_key}_{crit_id}_value")
+            criteria_fields.append(f"{dim_key}_{crit_id}_reason")
+    return ["plan_id", "title"] + score_fields + criteria_fields + ["comments"]
+
+
+def append_record(output_path: Path, jsonl_path: Path, record: EvaluationRecord) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = build_fieldnames()
+    write_header = not output_path.exists() or output_path.stat().st_size == 0
+    row = {
+        "plan_id": record.plan_id,
+        "title": record.title,
+        "comments": record.comments,
+    }
+    for key, value in record.scores.items():
+        row[key] = value
+    for dim_key, crits in record.criteria.items():
+        for crit_id, crit_payload in crits.items():
+            row[f"{dim_key}_{crit_id}_value"] = crit_payload.get("value")
+            row[f"{dim_key}_{crit_id}_reason"] = crit_payload.get("reason")
+    with output_path.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    with jsonl_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record.raw, ensure_ascii=False) + "\n")
+    print(
+        f"[INFO] Appended plan #{record.plan_id} to {output_path.name} and {jsonl_path.name}"
+    )
 
 
 def print_averages(records: List[EvaluationRecord]) -> None:
@@ -643,6 +818,8 @@ def print_averages(records: List[EvaluationRecord]) -> None:
     avgs = {m: round(totals[m] / n, 3) for m in metrics}
     line = " / ".join(f"{m}={avgs[m]}" for m in metrics)
     print(f"[INFO] Average scores over {n} plans: {line}")
+
+
 
 
 # --- Entrypoint ---------------------------------------------------------------
@@ -705,20 +882,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         prompt_dir = (
             (args.output.parent / "Prompts") if args.output else Path("results/Prompts")
         )
-        try:
-            records = asyncio.run(
-                evaluate_plans_async(
-                    plans,
-                    args,
-                    service,
-                    provider_label=provider_name,
-                    model_label=llm_client.model,
-                    prompt_dir=prompt_dir,
-                )
-            )
-        except Exception as exc:
-            return provider_name, False, f"Evaluation failed: {exc}"
-
         output_path = (
             provider_suffix_path(args.output, provider_name)
             if use_suffix
@@ -729,7 +892,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             if use_suffix
             else args.jsonl_output
         )
-        write_outputs(records, output_path, jsonl_path)
+        try:
+            records = asyncio.run(
+                evaluate_plans_async(
+                    plans,
+                    args,
+                    service,
+                    provider_label=provider_name,
+                    model_label=llm_client.model,
+                    prompt_dir=prompt_dir,
+                    stream_paths=(output_path, jsonl_path),
+                )
+            )
+        except Exception as exc:
+            return provider_name, False, f"Evaluation failed: {exc}"
+        if not args.stream_output:
+            write_outputs(records, output_path, jsonl_path)
         print_averages(records)
         return provider_name, True, None
 

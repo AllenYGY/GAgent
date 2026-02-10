@@ -12,9 +12,9 @@ web-ui/node_modules
 .vscode/*
 direct_plans/*
 results/*
-docs/plans/*
 experiments/*
 experiments-*/*
 bulk_plans.csv
 .pytest_cache/*
 .ruff_cache/*
+api_client.log

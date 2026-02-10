@@ -3,7 +3,7 @@
 Quickly summarize average plan-quality scores from one or more CSV files.
 
 Each input CSV is expected to have columns:
-plan_id,title,contextual_completeness,accuracy,task_granularity_atomicity,reproducibility_parameterization,scientific_rigor[,comments]
+plan_id,title,contextual_completeness,accuracy,task_granularity_atomicity,reproducibility_execution,scientific_rigor,innovation_feasibility[,comments]
 
 Usage:
   python scripts/eval/summarize_plan_scores.py results/*/eval/plan_scores*.csv
@@ -21,8 +21,9 @@ METRICS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 

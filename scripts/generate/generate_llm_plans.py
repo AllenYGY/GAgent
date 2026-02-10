@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -514,12 +515,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         else DEFAULT_PROMPT
     )
 
-    env_path = find_dotenv(usecwd=True)
-    if env_path:
-        try:
-            load_dotenv(env_path)
-        except Exception as exc:  # pragma: no cover
-            print(f"[WARN] Failed to load {env_path}: {exc}")
+    if os.getenv("SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print("[INFO] SKIP_DOTENV set; skipping .env loading.")
+    else:
+        env_path = find_dotenv(usecwd=True)
+        if env_path:
+            try:
+                load_dotenv(env_path)
+            except Exception as exc:  # pragma: no cover
+                print(f"[WARN] Failed to load {env_path}: {exc}")
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.dry_run:

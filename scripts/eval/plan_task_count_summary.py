@@ -25,8 +25,9 @@ METRICS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 

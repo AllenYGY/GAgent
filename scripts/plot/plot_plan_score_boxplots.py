@@ -34,8 +34,9 @@ DIMENSIONS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 # Colorblind- and print-friendly palette (Paul Tol-like)
@@ -184,6 +185,12 @@ def prettify_label(label: str) -> str:
         model = "DeepSeek-V3"
     elif "qwen" in low:
         model = "Qwen3-Max"
+    elif "gemini" in low:
+        model = "Gemini-3-Pro"
+    elif "grok" in low:
+        model = "Grok-4"
+    elif "gpt52" in low or "gpt-5.2" in low or "gpt5" in low:
+        model = "GPT-5.2-Chat"
     elif "glm" in low:
         model = "GLM"
     elif "gpt" in low:

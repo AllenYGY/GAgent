@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
+import statistics
 from collections import Counter
 from pathlib import Path
 from typing import List, Tuple
@@ -87,71 +87,74 @@ def _collect_delays_from_matrix(csv_path: Path) -> Tuple[Counter[int], List[int]
     return counter, raw_delays, unresolved
 
 
-def _plot_svg(counter: Counter[int], *, output_path: Path) -> None:
-    total = sum(counter.values())
-    if total == 0:
-        return
-    width, height = 500, 500
-    lines = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
-        "<style>text { font-family: Arial, sans-serif; }</style>",
-        '<text x="250" y="30" text-anchor="middle" font-size="20">Recovery delays</text>',
-    ]
-    cx, cy, r = width / 2, height / 2 + 10, 160
-    start_angle = 0.0
-    for delay, count in sorted(counter.items()):
-        proportion = count / total
-        sweep = proportion * 360.0
-        end_angle = start_angle + sweep
-        large_arc = 1 if sweep > 180 else 0
-        x1 = cx + r * math.cos(math.radians(start_angle))
-        y1 = cy + r * math.sin(math.radians(start_angle))
-        x2 = cx + r * math.cos(math.radians(end_angle))
-        y2 = cy + r * math.sin(math.radians(end_angle))
-        path = "M{:.2f},{:.2f} L{:.2f},{:.2f} A{r},{r} 0 {la} 1 {x2:.2f},{y2:.2f} Z".format(
-            cx,
-            cy,
-            x1,
-            y1,
-            la=large_arc,
-            x2=x2,
-            y2=y2,
-            r=r,
-        )
-        lines.append(
-            f'<path d="{path}" fill="#10b981" fill-opacity="{0.5 + 0.5 * proportion}" stroke="#ffffff" stroke-width="1" />'
-        )
-        mid_angle = start_angle + sweep / 2
-        lx = cx + (r + 20) * math.cos(math.radians(mid_angle))
-        ly = cy + (r + 20) * math.sin(math.radians(mid_angle))
-        lines.append(
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="12">{delay} ({count})</text>'
-        )
-        start_angle = end_angle
-    lines.append("</svg>")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _plot(counter: Counter[int], *, output: Path) -> Path:
-    if not counter:
+def _plot(
+    counter: Counter[int],
+    delays: List[int],
+    *,
+    output: Path,
+    unresolved: int,
+) -> Path:
+    if not counter and unresolved == 0:
         raise ValueError("No delays to plot")
     try:
         import matplotlib.pyplot as plt  # type: ignore
-    except ModuleNotFoundError:
-        svg_path = output.with_suffix(".svg")
-        _plot_svg(counter, output_path=svg_path)
-        return svg_path
-    labels = list(counter.keys())
-    sizes = [counter[k] for k in labels]
-    plt.figure(figsize=(6, 6))
-    plt.pie(sizes, labels=[f"{label}" for label in labels], autopct="%1.1f%%")
-    plt.title("Turns to recover after misalignment")
-    plt.tight_layout()
+        from matplotlib.ticker import MaxNLocator
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "[ERR] matplotlib is required for publication-quality plots. Install with: pip install matplotlib"
+        ) from exc
+
+    from nbt_style import PALETTE, set_nature_style, soften_axes
+
+    set_nature_style()
+    labels = sorted(counter.keys())
+    counts = [counter[k] for k in labels]
+
+    fig, ax = plt.subplots(figsize=(5.8, 3.2))
+    ax.bar(
+        labels,
+        counts,
+        color=PALETTE["hist"],
+        edgecolor="white",
+        linewidth=0.4,
+        zorder=3,
+    )
+    ax.set_xlabel("Turns to realignment")
+    ax.set_ylabel("Runs")
+    ax.set_title("Recovery after misalignment")
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.grid(axis="y", color=PALETTE["grid"], linestyle="-", zorder=0)
+
+    if delays:
+        median_val = statistics.median(delays)
+        ax.axvline(median_val, color=PALETTE["accent"], lw=1.0, ls="--")
+        ax.text(
+            median_val,
+            ax.get_ylim()[1] * 0.95,
+            f"median {median_val:.1f}",
+            ha="center",
+            va="top",
+            fontsize=7,
+            color=PALETTE["accent"],
+        )
+
+    if unresolved:
+        ax.text(
+            0.98,
+            0.95,
+            f"No recovery: {unresolved}",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=7,
+            color=PALETTE["muted"],
+        )
+
+    soften_axes(ax)
     output.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output)
-    plt.close()
+    fig.savefig(output)
+    plt.close(fig)
     return output
 
 
@@ -192,7 +195,7 @@ def main() -> None:
         )
         return
 
-    saved = _plot(counter, output=Path(args.output))
+    saved = _plot(counter, delays, output=Path(args.output), unresolved=unresolved)
     print(f"[INFO] Saved recovery distribution to {saved}")
     data_path = Path(args.output).with_suffix(".json")
     data_path.write_text(

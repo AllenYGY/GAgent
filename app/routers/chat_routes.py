@@ -42,6 +42,7 @@ from app.services.llm.structured_response import (
 from app.services.memory.chat_memory_middleware import get_chat_memory_middleware
 from app.services.memory.memory_service import get_memory_service
 from app.services.plans.action_catalog import build_action_catalog
+from app.services.plans.action_executor import ActionExecutor
 from app.services.plans.action_schema import normalize_action
 from app.services.plans.decomposition_jobs import (
     get_current_job,
@@ -1910,6 +1911,7 @@ class StructuredChatAgent:
         plan_session: Optional[PlanSession] = None,
         plan_decomposer: Optional[PlanDecomposer] = None,
         plan_executor: Optional[PlanExecutor] = None,
+        action_executor: Optional[ActionExecutor] = None,
         session_id: Optional[str] = None,
         conversation_id: Optional[int] = None,
         history: Optional[List[Dict[str, str]]] = None,
@@ -1933,6 +1935,10 @@ class StructuredChatAgent:
         self.llm_service = get_llm_service()
         self.plan_decomposer = plan_decomposer
         self.plan_executor = plan_executor
+        self.action_executor = action_executor or ActionExecutor(
+            repo=self.plan_session.repo,
+            plan_decomposer=self.plan_decomposer,
+        )
         self.decomposer_settings = decomposer_settings
         self._last_decomposition: Optional[DecompositionResult] = None
         self._decomposition_errors: List[str] = []
@@ -1997,6 +2003,8 @@ class StructuredChatAgent:
                     details={"exception": type(exc).__name__},
                 )
             steps.append(step)
+            if not step.success and step.message not in errors:
+                errors.append(step.message)
 
         suggestions = self._build_suggestions(structured, steps)
         success = all(step.success for step in steps) if steps else True
@@ -2844,275 +2852,57 @@ class StructuredChatAgent:
         params = action.parameters or {}
         tree = self._require_plan_bound()
 
-        if action.name == "create_task":
-            name = params.get("task_name") or params.get("name") or params.get("title")
-            if not name:
-                raise ValueError("create_task requires a task_name.")
-            instruction = params.get("instruction")
-            parent_id = params.get("parent_id")
-            if parent_id is not None:
-                parent_id = self._coerce_int(parent_id, "parent_id")
-            metadata = (
-                params.get("metadata")
-                if isinstance(params.get("metadata"), dict)
-                else None
+        if action.name in {
+            "create_task",
+            "update_task",
+            "update_task_instruction",
+            "move_task",
+            "delete_task",
+            "decompose_task",
+        }:
+            if self.action_executor is None:
+                self.action_executor = ActionExecutor(
+                    repo=self.plan_session.repo,
+                    plan_decomposer=self.plan_decomposer,
+                )
+            results = self.action_executor.apply_actions(
+                tree.id,
+                [action],
+                allow_delete_subtree=True,
+                require_delete_subtree_flag=False,
+                allow_delete_root=True,
+                enforce_dependency_check=False,
+                allow_decompose_web_search=True,
             )
-            dependencies = self._normalize_dependencies(params.get("dependencies"))
+            result = results[0]
+            details = dict(result.details)
+            if result.rejected:
+                details["rejected"] = True
 
-            raw_anchor_task_id = params.get("anchor_task_id")
-            anchor_task_id = None
-            if raw_anchor_task_id is not None:
-                anchor_task_id = self._coerce_int(raw_anchor_task_id, "anchor_task_id")
-
-            anchor_position = params.get("anchor_position")
-            if anchor_position is not None and not isinstance(anchor_position, str):
-                raise ValueError("anchor_position must be a string.")
-            if isinstance(anchor_position, str):
-                anchor_position = anchor_position.strip()
-                anchor_position = anchor_position.lower() if anchor_position else None
-
-            position_param = params.get("position")
-            position: Optional[int] = None
-            if position_param is not None:
-                if isinstance(position_param, str):
-                    position_str = position_param.strip()
-                    if position_str:
-                        parts = position_str.split(":", 1)
-                        keyword = parts[0].strip().lower()
-                        if keyword in {"before", "after"}:
-                            if len(parts) < 2 or not parts[1].strip():
-                                raise ValueError(
-                                    "position must follow the format 'before:<task_id>' or 'after:<task_id>'."
-                                )
-                            candidate_id = self._coerce_int(
-                                parts[1].strip(), f"position {keyword}"
-                            )
-                            if (
-                                anchor_task_id is not None
-                                and anchor_task_id != candidate_id
-                            ):
-                                raise ValueError(
-                                    "anchor_task_id does not match the task referenced in position."
-                                )
-                            if (
-                                anchor_position is not None
-                                and anchor_position != keyword
-                            ):
-                                raise ValueError(
-                                    "anchor_position does not match the pattern specified in position."
-                                )
-                            anchor_task_id = candidate_id
-                            anchor_position = keyword
-                        elif keyword in {"first_child", "last_child"}:
-                            if (
-                                anchor_position is not None
-                                and anchor_position != keyword
-                            ):
-                                raise ValueError(
-                                    "anchor_position does not match the pattern specified in position."
-                                )
-                            anchor_position = keyword
-                        else:
-                            position = self._coerce_int(position_param, "position")
-                    else:
-                        position = None
+            if result.success:
+                if action.name == "decompose_task":
+                    created = details.get("created") or []
+                    if created:
+                        self._dirty = True
+                    try:
+                        self._refresh_plan_tree(force_reload=True)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.warning(
+                            "Failed to refresh plan tree after decomposition: %s", exc
+                        )
+                        self._decomposition_errors.append(
+                            f"Failed to refresh plan after decomposition: {exc}"
+                        )
                 else:
-                    position = self._coerce_int(position_param, "position")
-
-            if position is not None and position < 0:
-                raise ValueError("position cannot be negative.")
-
-            insert_before_val = params.get("insert_before")
-            insert_after_val = params.get("insert_after")
-            insert_before_id = (
-                self._coerce_int(insert_before_val, "insert_before")
-                if insert_before_val is not None
-                else None
-            )
-            insert_after_id = (
-                self._coerce_int(insert_after_val, "insert_after")
-                if insert_after_val is not None
-                else None
-            )
-
-            siblings_parent_key = parent_id if parent_id is not None else None
-            siblings = tree.children_ids(siblings_parent_key)
-
-            if insert_before_id is not None and insert_after_id is not None:
-                if insert_before_id == insert_after_id:
-                    raise ValueError(
-                        "insert_before and insert_after cannot point to the same task."
-                    )
-                if insert_after_id not in siblings or insert_before_id not in siblings:
-                    raise ValueError(
-                        "insert_before / The task referenced by insert_after does not belong to the target parent node."
-                    )
-                after_idx = siblings.index(insert_after_id)
-                before_idx = siblings.index(insert_before_id)
-                if after_idx > before_idx:
-                    raise ValueError("insert_after must appear before insert_before.")
-                if anchor_task_id is not None and anchor_task_id not in {
-                    insert_after_id,
-                    insert_before_id,
-                }:
-                    raise ValueError(
-                        "anchor_task_id is inconsistent with insert_before/insert_after."
-                    )
-                anchor_task_id = insert_after_id
-                anchor_position = "after"
-            else:
-                if insert_before_id is not None:
-                    if (
-                        anchor_task_id is not None
-                        and anchor_task_id != insert_before_id
-                    ):
-                        raise ValueError(
-                            "anchor_task_id points to a different task than insert_before."
-                        )
-                    if insert_before_id not in siblings:
-                        raise ValueError(
-                            "The task referenced by insert_before does not belong to the target parent node."
-                        )
-                    anchor_task_id = insert_before_id
-                    anchor_position = "before"
-                if insert_after_id is not None:
-                    if anchor_task_id is not None and anchor_task_id != insert_after_id:
-                        raise ValueError(
-                            "anchor_task_id points to a different task than insert_after."
-                        )
-                    if insert_after_id not in siblings:
-                        raise ValueError(
-                            "The task referenced by insert_after does not belong to the target parent node."
-                        )
-                    anchor_task_id = insert_after_id
-                    anchor_position = "after"
-            if anchor_position is not None:
-                valid_anchor_positions = {
-                    "before",
-                    "after",
-                    "first_child",
-                    "last_child",
-                }
-                if anchor_position not in valid_anchor_positions:
-                    raise ValueError(
-                        f"Invalid anchor_position; only {', '.join(sorted(valid_anchor_positions))} are supported."
-                    )
-            node = self.plan_session.repo.create_task(
-                tree.id,
-                name=name,
-                instruction=instruction,
-                parent_id=parent_id,
-                metadata=metadata,
-                dependencies=dependencies,
-                position=position,
-                anchor_task_id=anchor_task_id,
-                anchor_position=anchor_position,
-            )
-            self._refresh_plan_tree()
-            message = f"Created task [{node.id}] {node.name}."
-            details = {"task": node.model_dump()}
-            self._dirty = True
+                    no_change = bool(details.get("no_change"))
+                    if not no_change:
+                        self._dirty = True
+                        self._refresh_plan_tree()
             return AgentStep(
-                action=action, success=True, message=message, details=details
-            )
-
-        if action.name == "update_task":
-            task_id = self._coerce_int(params.get("task_id"), "task_id")
-            name = params.get("name")
-            instruction = params.get("instruction")
-            metadata = (
-                params.get("metadata")
-                if isinstance(params.get("metadata"), dict)
-                else None
-            )
-            dependencies = self._normalize_dependencies(params.get("dependencies"))
-            if all(
-                v is None
-                for v in [
-                    name,
-                    instruction,
-                    metadata,
-                    dependencies,
-                ]
-            ):
-                raise ValueError(
-                    "update_task requires at least one of name, instruction, metadata, or dependencies."
-                )
-            node = self.plan_session.repo.update_task(
-                tree.id,
-                task_id,
-                name=name,
-                instruction=instruction,
-                metadata=metadata,
-                dependencies=dependencies,
-            )
-            self._refresh_plan_tree()
-            message = f"Task [{node.id}] information has been updated."
-            details = {"task": node.model_dump()}
-            self._dirty = True
-            return AgentStep(
-                action=action, success=True, message=message, details=details
-            )
-
-        if action.name == "update_task_instruction":
-            task_id = self._coerce_int(params.get("task_id"), "task_id")
-            instruction = params.get("instruction")
-            if not instruction:
-                raise ValueError("update_task_instruction requires an instruction.")
-            existing = tree.nodes.get(task_id)
-            if (
-                existing
-                and (existing.instruction or "").strip() == str(instruction).strip()
-            ):
-                message = f"Task [{task_id}] instruction is already up to date; no change applied."
-                details = {"task": existing.model_dump()}
-                return AgentStep(
-                    action=action, success=True, message=message, details=details
-                )
-            node = self.plan_session.repo.update_task(
-                tree.id,
-                task_id,
-                instruction=instruction,
-            )
-            self._refresh_plan_tree()
-            message = f"Task [{node.id}] instructions have been updated."
-            details = {"task": node.model_dump()}
-            self._dirty = True
-            return AgentStep(
-                action=action, success=True, message=message, details=details
-            )
-
-        if action.name == "move_task":
-            task_id = self._coerce_int(params.get("task_id"), "task_id")
-            new_parent_id = params.get("new_parent_id")
-            if new_parent_id is not None:
-                new_parent_id = self._coerce_int(new_parent_id, "new_parent_id")
-            new_position = params.get("new_position")
-            if new_position is not None:
-                new_position = self._coerce_int(new_position, "new_position")
-            node = self.plan_session.repo.move_task(
-                tree.id,
-                task_id,
-                new_parent_id=new_parent_id,
-                new_position=new_position,
-            )
-            self._refresh_plan_tree()
-            message = f"Task [{node.id}] has been moved to a new position."
-            details = {"task": node.model_dump()}
-            self._dirty = True
-            return AgentStep(
-                action=action, success=True, message=message, details=details
-            )
-
-        if action.name == "delete_task":
-            task_id = self._coerce_int(params.get("task_id"), "task_id")
-            self.plan_session.repo.delete_task(tree.id, task_id)
-            self._refresh_plan_tree()
-            message = f"Task [{task_id}] and its subtasks have been deleted."
-            details = {"task_id": task_id}
-            self._dirty = True
-            return AgentStep(
-                action=action, success=True, message=message, details=details
+                action=action,
+                success=result.success,
+                message=result.message,
+                details=details,
             )
 
         if action.name == "show_tasks":
@@ -3147,109 +2937,6 @@ class StructuredChatAgent:
             message = f"Task [{task_id}] execution status: {result.status}."
             details = result.to_dict()
             self._refresh_plan_tree(force_reload=True)
-            return AgentStep(
-                action=action, success=True, message=message, details=details
-            )
-
-        if action.name == "decompose_task":
-            if self.plan_decomposer is None:
-                raise ValueError(
-                    "Task decomposition service is not enabled in this environment."
-                )
-            if self.decomposer_settings.model is None:
-                raise ValueError("No decomposition model configured; cannot proceed.")
-
-            expand_depth_raw = params.get("expand_depth")
-            node_budget_raw = params.get("node_budget")
-            allow_existing_raw = params.get("allow_existing_children")
-            allow_web_search_raw = params.get("allow_web_search")
-
-            expand_depth = (
-                self._coerce_int(expand_depth_raw, "expand_depth")
-                if expand_depth_raw is not None
-                else None
-            )
-            node_budget = (
-                self._coerce_int(node_budget_raw, "node_budget")
-                if node_budget_raw is not None
-                else None
-            )
-            allow_existing_children = None
-            if allow_existing_raw is not None:
-                if isinstance(allow_existing_raw, bool):
-                    allow_existing_children = allow_existing_raw
-                else:
-                    allow_existing_children = str(
-                        allow_existing_raw
-                    ).strip().lower() in {
-                        "1",
-                        "true",
-                        "yes",
-                        "y",
-                    }
-            allow_web_search = None
-            if allow_web_search_raw is not None:
-                if isinstance(allow_web_search_raw, bool):
-                    allow_web_search = allow_web_search_raw
-                else:
-                    allow_web_search = str(
-                        allow_web_search_raw
-                    ).strip().lower() in {
-                        "1",
-                        "true",
-                        "yes",
-                        "y",
-                    }
-
-            task_id_raw = params.get("task_id")
-            if task_id_raw is None:
-                result = self.plan_decomposer.run_plan(
-                    tree.id,
-                    max_depth=expand_depth,
-                    node_budget=node_budget,
-                    allow_web_search=allow_web_search,
-                )
-            else:
-                task_id = self._coerce_int(task_id_raw, "task_id")
-                result = self.plan_decomposer.decompose_node(
-                    tree.id,
-                    task_id,
-                    expand_depth=expand_depth,
-                    node_budget=node_budget,
-                    allow_existing_children=allow_existing_children,
-                    allow_web_search=allow_web_search,
-                )
-
-            self._last_decomposition = result
-            if result.created_tasks:
-                self._dirty = True
-            try:
-                self._refresh_plan_tree(force_reload=True)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Failed to refresh plan tree after decomposition: %s", exc
-                )
-                self._decomposition_errors.append(
-                    f"Failed to refresh plan after decomposition: {exc}"
-                )
-
-            created_count = len(result.created_tasks)
-            message = (
-                f"Generated {created_count} subtasks."
-                if created_count
-                else "No new subtasks were generated."
-            )
-            if result.stopped_reason:
-                message += f" Stop reason: {result.stopped_reason}."
-            details = {
-                "plan_id": tree.id,
-                "mode": result.mode,
-                "processed_nodes": result.processed_nodes,
-                "created": [node.model_dump() for node in result.created_tasks],
-                "failed_nodes": result.failed_nodes,
-                "stopped_reason": result.stopped_reason,
-                "stats": result.stats,
-            }
             return AgentStep(
                 action=action, success=True, message=message, details=details
             )

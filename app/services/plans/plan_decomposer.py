@@ -108,6 +108,7 @@ class DecompositionPromptBuilder:
                     "- Do not force web details into unrelated tasks.",
                     "- Summarize web info into executable details; do not paste long quotes.",
                     "- If web context is used, include a short 'web_search' entry in child.context.sections.",
+                    "- If web context enables a non-obvious approach, capture it explicitly as innovation with expected benefit, feasibility constraints, resources, and risks/mitigations.",
                 ]
             )
         prompt.extend(
@@ -154,6 +155,7 @@ class DecompositionPromptBuilder:
                 "- Do not invent additional top-level keys beyond this schema.",
                 f"- Aim to produce between {settings.min_children} and {settings.max_children} well-scoped child tasks when the work warrants it.",
                 f"- Returning fewer than {settings.min_children} children is acceptable only if the task is inherently small; explain via `reason` when doing so.",
+                "- Where possible, include Innovation & Feasibility in child context (non-obvious idea, expected benefit, feasibility constraints, resource needs, risks/mitigation).",
                 "\nOnly return JSON. Do not wrap the response in Markdown code fences.",
             ]
         )
@@ -518,6 +520,7 @@ class PlanDecomposer:
                 "- If the output artifact is missing, add it explicitly in the instruction (e.g., '... -> output: <file/table/model>').",
                 "- Do NOT merge distinct phases (preprocess + train + evaluate) or multiple outputs/tools into one node.",
                 "- context.combined MUST include: Why (rationale), Assumption/Constraint, and Metric/Validation (if available). Keep to 1–3 sentences.",
+                "- Where possible, add Innovation & Feasibility details in context.combined or a dedicated context.sections entry: non-obvious idea, expected benefit, feasibility constraints, resource needs, risks/mitigation.",
                 "- Prefer concrete parameters/metrics from web context; if unknown, say what is missing.",
                 "- If a field does not need changes, return the original value.",
             ]

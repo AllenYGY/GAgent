@@ -3,7 +3,7 @@
 Plot plan-quality scores as grouped bar charts.
 
 Expected input CSV (e.g., produced by summarize_plan_scores.py):
-  name,n,contextual_completeness,accuracy,task_granularity_atomicity,reproducibility_parameterization,scientific_rigor
+  name,n,contextual_completeness,accuracy,task_granularity_atomicity,reproducibility_execution,scientific_rigor,innovation_feasibility
 
 We put metrics on the x-axis, and for each metric, plot one bar per model/run.
 Legend is auto-prettified into four常见标签:
@@ -43,8 +43,9 @@ METRICS = [
     "contextual_completeness",
     "accuracy",
     "task_granularity_atomicity",
-    "reproducibility_parameterization",
+    "reproducibility_execution",
     "scientific_rigor",
+    "innovation_feasibility",
 ]
 
 

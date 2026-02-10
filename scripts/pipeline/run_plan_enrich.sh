@@ -8,14 +8,20 @@ set -euo pipefail
 ROOT="/Users/allenygy/Research/GAgent"
 
 RUNS=(
-  "data/databases_deepseek_web_enrich_from_deepseek_v2|results/agent_plans_phage_deepseek/plans|results/agent_plans_phage_deepseek_web_enriched_v2/plans|deepseek-v3"
-  "data/databases_qwen_web_enrich_from_qwen_v2|results/agent_plans_phage_qwen/plans|results/agent_plans_phage_qwen_web_enriched_v2/plans|qwen3-max"
+  "data/databases_deepseek_web_enrich_refactor_v2|results/agent_plans_phage_deepseek/plans|results/agent_plans_phage_deepseek_web_enriched_refactor_v2/plans|deepseek-v3"
+  "data/databases_qwen_web_enrich_refactor_v2|results/agent_plans_phage_qwen/plans|results/agent_plans_phage_qwen_web_enriched_refactor_v2/plans|qwen3-max"
 )
 
 ENRICH_ALLOW_WEB_SEARCH="${ENRICH_ALLOW_WEB_SEARCH:-true}"
 ENRICH_TITLE_PREFIX="${ENRICH_TITLE_PREFIX:-Imported}"
 ENRICH_MAX_DEPTH="${ENRICH_MAX_DEPTH:-}"
 ENRICH_NODE_BUDGET="${ENRICH_NODE_BUDGET:-}"
+ENRICH_ENABLE_REFACTOR="${ENRICH_ENABLE_REFACTOR:-true}"
+REFACTOR_MAX_ACTIONS="${REFACTOR_MAX_ACTIONS:-25}"
+REFACTOR_ACTION_ALLOWLIST="${REFACTOR_ACTION_ALLOWLIST:-create_task,update_task,move_task,delete_task,decompose_task}"
+REFACTOR_ALLOW_DELETE_SUBTREE="${REFACTOR_ALLOW_DELETE_SUBTREE:-false}"
+REFACTOR_DECOMPOSE_ALLOW_WEB_SEARCH="${REFACTOR_DECOMPOSE_ALLOW_WEB_SEARCH:-false}"
+REFACTOR_LOG_DIR="${REFACTOR_LOG_DIR:-}"
 
 if ! command -v parallel >/dev/null 2>&1; then
   echo "[ERR] GNU parallel is required. Install it or set USE_XARGS=1 to use xargs -P." >&2
@@ -104,10 +110,18 @@ parallel --colsep '\t' --jobs "$concurrency" --lb \
      export ENRICH_INPUT_PATH="$input_path"; \
      export ENRICH_OUTPUT_DIR="$output_dir"; \
      export QWEN_MODEL="$model"; \
+     export REFACTOR_MODEL="$model"; \
+     export REFACTOR_PROVIDER="qwen"; \
      export ENRICH_TITLE_PREFIX="'$ENRICH_TITLE_PREFIX'"; \
      export ENRICH_ALLOW_WEB_SEARCH="'$ENRICH_ALLOW_WEB_SEARCH'"; \
      export ENRICH_MAX_DEPTH="'$ENRICH_MAX_DEPTH'"; \
      export ENRICH_NODE_BUDGET="'$ENRICH_NODE_BUDGET'"; \
+     export ENRICH_ENABLE_REFACTOR="'$ENRICH_ENABLE_REFACTOR'"; \
+     export REFACTOR_MAX_ACTIONS="'$REFACTOR_MAX_ACTIONS'"; \
+     export REFACTOR_ACTION_ALLOWLIST="'$REFACTOR_ACTION_ALLOWLIST'"; \
+     export REFACTOR_ALLOW_DELETE_SUBTREE="'$REFACTOR_ALLOW_DELETE_SUBTREE'"; \
+     export REFACTOR_DECOMPOSE_ALLOW_WEB_SEARCH="'$REFACTOR_DECOMPOSE_ALLOW_WEB_SEARCH'"; \
+     export REFACTOR_LOG_DIR="'$REFACTOR_LOG_DIR'"; \
      python scripts/pipeline/plan_enrichment_pipeline.py; \
    done < {2}' \
   :::: "$pairs_file"
