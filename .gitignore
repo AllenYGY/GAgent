@@ -18,3 +18,4 @@ bulk_plans.csv
 .pytest_cache/*
 .ruff_cache/*
 api_client.log
+scripts/*
