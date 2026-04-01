@@ -58,6 +58,9 @@ class LLMService:
             try:
                 return self._execute_chat(prompt, **kwargs)
             except Exception as e:
+                if self._is_fatal_http_error(e):
+                    logger.error(f"Fatal LLM chat error (no retry): {e}")
+                    raise
                 logger.warning(f"LLM chat attempt {attempt + 1} failed: {e}")
                 if attempt < self._retry_attempts - 1:
                     time.sleep(self._retry_delay * (attempt + 1))
@@ -86,6 +89,9 @@ class LLMService:
             try:
                 return await self._execute_chat_async(prompt, **kwargs)
             except Exception as e:
+                if self._is_fatal_http_error(e):
+                    logger.error(f"Fatal async LLM chat error (no retry): {e}")
+                    raise
                 logger.warning(f"Async LLM chat attempt {attempt + 1} failed: {e}")
                 if attempt < self._retry_attempts - 1:
                     await asyncio.sleep(self._retry_delay * (attempt + 1))
@@ -200,6 +206,11 @@ class LLMService:
         
         # Fallback to string representation
         return str(response)
+
+    @staticmethod
+    def _is_fatal_http_error(exc: Exception) -> bool:
+        message = str(exc)
+        return "LLM HTTPError: 402" in message or "HTTP Error 402" in message
     
     def parse_json_response(self, content: str) -> Optional[Dict[str, Any]]:
         """

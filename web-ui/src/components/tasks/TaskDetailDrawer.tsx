@@ -282,7 +282,7 @@ const TaskDetailDrawer: React.FC = () => {
   };
 
   const renderContextMeta = () => {
-    const meta = activeTask?.context_meta;
+    const meta: unknown = activeTask?.context_meta;
     if (meta === null || meta === undefined) {
       return null;
     }

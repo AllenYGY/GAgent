@@ -415,7 +415,39 @@ def _parse_plan_text(raw: str) -> Dict[str, Any]:
         payload = {"raw": payload}
     _validate_full_plan_payload(payload)
     return payload
-        raise
+
+
+def _is_fatal_llm_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "LLM HTTPError: 402" in message or "HTTP Error 402" in message
+
+
+def _collect_plan_rows_from_judge(judge_dir: Path) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    if not judge_dir.exists():
+        return rows
+
+    for path in sorted(judge_dir.glob("run*_turn*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        run = payload.get("run")
+        turn = payload.get("turn")
+        if run is None or turn is None:
+            continue
+        rows.append(
+            {
+                "run": int(run),
+                "turn": int(turn),
+                "base_plan_path": payload.get("base_plan_path"),
+                "agent_plan_path": payload.get("agent_plan_path"),
+                "alignment": payload.get("alignment"),
+                "reason": payload.get("reason"),
+            }
+        )
+    rows.sort(key=lambda r: (r["run"], r["turn"]))
+    return rows
 
 
 def _generate_agent_plan(
@@ -472,6 +504,12 @@ def main() -> None:
         type=int,
         default=10,
         help="Number of clones/simulations to run (default 10).",
+    )
+    parser.add_argument(
+        "--run-start",
+        type=int,
+        default=1,
+        help="Starting run index (plan mode). Use with existing output-root to resume.",
     )
     parser.add_argument(
         "--parallelism", type=int, default=5, help="Maximum concurrent simulations."
@@ -606,6 +644,7 @@ def main() -> None:
             "mode": "plan",
             "input_plan_json": str(ip),
             "runs": args.runs,
+            "run_start": args.run_start,
             "max_turns": args.max_turns,
             "parallelism": args.parallelism,
             "output_root": str(output_root),
@@ -723,6 +762,8 @@ def main() -> None:
                                 args.temperature,
                             )
                         except Exception as exc:
+                            if _is_fatal_llm_error(exc):
+                                raise
                             last_exc = exc
                             if attempt == 1:
                                 print(
@@ -741,6 +782,10 @@ def main() -> None:
                         sim_user_parsed_dir,
                     )
                 except Exception as exc:
+                    if _is_fatal_llm_error(exc):
+                        raise RuntimeError(
+                            f"Fatal billing error during simulated-user generation: {exc}"
+                        ) from exc
                     print(
                         f"[ERR] Failed to generate simulated user plan run={run_idx} turn={turn_idx}: {exc}"
                     )
@@ -766,6 +811,10 @@ def main() -> None:
                         parsed_dir,
                     )
                 except Exception as exc:
+                    if _is_fatal_llm_error(exc):
+                        raise RuntimeError(
+                            f"Fatal billing error during agent generation: {exc}"
+                        ) from exc
                     print(
                         f"[ERR] Failed to generate agent plan run={run_idx} turn={turn_idx}: {exc}"
                     )
@@ -790,6 +839,10 @@ def main() -> None:
                         args.temperature,
                     )
                 except Exception as exc:
+                    if _is_fatal_llm_error(exc):
+                        raise RuntimeError(
+                            f"Fatal billing error during judge call: {exc}"
+                        ) from exc
                     print(f"[ERR] Judge failed run={run_idx} turn={turn_idx}: {exc}")
                     _record_failure(
                         run_idx,
@@ -846,7 +899,7 @@ def main() -> None:
         # Each run uses a base plan (cycle if fewer plans than runs)
         run_targets = [
             (run_idx, plan_inputs[(run_idx - 1) % len(plan_inputs)])
-            for run_idx in range(1, args.runs + 1)
+            for run_idx in range(args.run_start, args.run_start + args.runs)
         ]
 
         with ThreadPoolExecutor(max_workers=parallelism) as executor:
@@ -860,8 +913,13 @@ def main() -> None:
                     rows = future.result()
                     plan_results.extend(rows)
                 except Exception as exc:
+                    if _is_fatal_llm_error(exc) or "Fatal billing error" in str(exc):
+                        print(f"[ERR] Fatal 402 detected on run {run_idx}; aborting entire plan experiment.")
+                        raise SystemExit(2)
                     print(f"[ERR] Run {run_idx} failed: {exc}")
 
+        # Build results from judge artifacts so resume runs and prior completed runs are preserved.
+        all_rows = _collect_plan_rows_from_judge(judge_dir)
         with results_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow([
@@ -872,7 +930,7 @@ def main() -> None:
                 "alignment",
                 "reason",
             ])
-            for row in plan_results:
+            for row in all_rows:
                 writer.writerow([
                     row["run"],
                     row["turn"],
@@ -881,7 +939,9 @@ def main() -> None:
                     row["alignment"],
                     row["reason"],
                 ])
-        print(f"[INFO] Full-plan judging completed. Results: {results_path}")
+        print(
+            f"[INFO] Full-plan judging completed. Results: {results_path} (rows={len(all_rows)})"
+        )
         return
 
     # ---------------- action mode: existing simulation flow ---------------- #

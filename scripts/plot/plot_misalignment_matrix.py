@@ -21,7 +21,7 @@ Example:
     --inputs experiments/simulation_agent_misalignment_matrix_qwen.csv \
     --output-dir experiments/plots \
     --style circos-classic \
-    --link-mode both
+    --link-mode first-recovery
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ try:
     import matplotlib.pyplot as plt
     from matplotlib.colors import (
         BoundaryNorm,
-        LinearSegmentedColormap,
         ListedColormap,
         to_rgba,
     )
@@ -63,6 +62,22 @@ from nbt_style import (
 )
 
 
+def set_times_new_roman_style() -> None:
+    plt.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.serif": [
+                "Times New Roman",
+                "Times",
+                "Nimbus Roman",
+                "Nimbus Roman No9 L",
+                "DejaVu Serif",
+            ],
+            "mathtext.fontset": "stix",
+        }
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot misalignment matrix CSVs.")
     parser.add_argument(
@@ -86,31 +101,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--link-mode",
         choices=["first-recovery", "segments", "both", "none"],
-        default="both",
-        help="Link definition for circos-classic.",
+        default="first-recovery",
+        help="Deprecated compatibility flag; circos-classic now renders ring summaries instead of links.",
     )
     parser.add_argument(
         "--min-link-count",
         type=int,
         default=2,
-        help="Minimum aggregated count to render a link (circos-classic).",
+        help="Deprecated compatibility flag retained for older commands.",
     )
     parser.add_argument(
         "--max-links",
         type=int,
-        default=220,
-        help="Maximum number of links to render per link type (circos-classic).",
+        default=32,
+        help="Deprecated compatibility flag retained for older commands.",
     )
     parser.add_argument(
+        "--link-bins",
         "--run-bins",
+        dest="link_bins",
         type=int,
-        default=20,
-        help="Number of run bins for heatmap track (circos-classic).",
+        default=10,
+        help="Number of turn bins used to aggregate recovery links (circos-classic).",
     )
     parser.add_argument(
         "--compare-output",
         type=Path,
         help="Optional output path for a multi-file comparison plot.",
+    )
+    parser.add_argument(
+        "--compare-legend-position",
+        choices=["right", "bottom"],
+        default="right",
+        help="Legend placement for the comparison plot.",
     )
     return parser.parse_args()
 
@@ -119,21 +142,36 @@ def label_from_path(path: Path) -> str:
     name = path.stem
     name = name.replace("simulation_", "")
     name = name.replace("_misalignment_matrix", "")
-    parts = name.replace("-", "_").split("_")
-    labels = []
-    for part in parts:
-        low = part.lower()
-        if low == "llm":
-            labels.append("LLM")
-        elif low == "agent":
-            labels.append("Agent")
-        elif low == "qwen":
-            labels.append("Qwen")
-        elif low.startswith("deepseek"):
-            labels.append("DeepSeekV3" if "v3" in low else "DeepSeek")
-        else:
-            labels.append(part.capitalize() if part else part)
-    return " ".join(labels) if labels else path.stem
+    normalized = name.replace("-", "_").lower()
+
+    if normalized == "agent_qwen":
+        return "PhageAgent"
+
+    if normalized.startswith("llm_"):
+        model_name = normalized[len("llm_") :]
+        model_overrides = {
+            "deepseekv3": "DeepSeekV3",
+            "deepseek_v3": "DeepSeekV3",
+            "deepseek": "DeepSeek",
+            "qwen": "Qwen3-Max",
+            "qwen3max": "Qwen3-Max",
+            "qwen3_max": "Qwen3-Max",
+            "grok": "grok-4-1-fast-reasoning",
+            "grok_4_1_fast_reasoning": "grok-4-1-fast-reasoning",
+            "gemini": "gemini-3-flash-preview",
+            "gemini_3_flash_preview": "gemini-3-flash-preview",
+            "gpt52chat": "GPT-5.2-Chat",
+            "gpt_5_2_chat": "GPT-5.2-Chat",
+            "gpt53chat": "GPT-5.3-Chat",
+            "gpt_5_3_chat": "GPT-5.3-Chat",
+        }
+        if model_name in model_overrides:
+            return model_overrides[model_name]
+        parts = [part for part in model_name.split("_") if part]
+        return " ".join(part.capitalize() for part in parts) if parts else path.stem
+
+    parts = [part for part in normalized.split("_") if part]
+    return " ".join(part.capitalize() for part in parts) if parts else path.stem
 
 
 def load_matrix(path: Path) -> Tuple[np.ndarray, List[int]]:
@@ -165,11 +203,11 @@ def plot_dashboard(
     data: np.ndarray, turns: List[int], label: str, output_path: Path
 ) -> None:
     n_runs, n_turns = data.shape
-    rate_per_turn = data.mean(axis=0)
+    alignment_rate_per_turn = 1.0 - data.mean(axis=0)
     per_run_counts = data.sum(axis=1)
-    overall_rate = float(data.mean())
+    overall_alignment_rate = float(alignment_rate_per_turn.mean())
 
-    fig = plt.figure(figsize=(7.2, 4.6))
+    fig = plt.figure(figsize=(8.6, 5.4))
     gs = fig.add_gridspec(
         nrows=2,
         ncols=2,
@@ -211,21 +249,31 @@ def plot_dashboard(
         borderpad=0.2,
     )
 
-    ax_rate.plot(turns, rate_per_turn, color=PALETTE["rate"], lw=1.6)
-    ax_rate.fill_between(turns, rate_per_turn, color=PALETTE["rate"], alpha=0.14)
-    ax_rate.set_title("Misalignment rate")
+    ax_rate.scatter(
+        turns,
+        alignment_rate_per_turn,
+        facecolors="white",
+        edgecolors=PALETTE["rate"],
+        s=13,
+        alpha=0.95,
+        linewidths=0.7,
+        zorder=4,
+    )
+    ax_rate.set_title("Turn-wise Alignment Score")
     ax_rate.set_xlabel("Turn")
-    ax_rate.set_ylabel("Rate")
+    ax_rate.set_ylabel("Alignment rate")
     ax_rate.set_ylim(0, 1)
     ax_rate.yaxis.set_major_formatter(PercentFormatter(1.0))
     ax_rate.yaxis.set_major_locator(MaxNLocator(5))
     ax_rate.grid(True, axis="y", color=PALETTE["grid"], alpha=0.6, linestyle="-")
     ax_rate.set_xticks([turns[i] for i in x_positions])
 
-    ax_rate.axhline(overall_rate, color=PALETTE["accent"], lw=1.0, ls="--")
+    ax_rate.axhline(
+        overall_alignment_rate, color=PALETTE["accent"], lw=1.0, ls="--"
+    )
     ax_rate.annotate(
-        f"Overall {overall_rate:.1%}",
-        xy=(turns[-1], overall_rate),
+        f"Overall {overall_alignment_rate:.1%}",
+        xy=(turns[-1], overall_alignment_rate),
         xytext=(6, 6),
         textcoords="offset points",
         ha="right",
@@ -267,20 +315,11 @@ def plot_dashboard(
     add_panel_label(ax_rate, "b")
     add_panel_label(ax_hist, "c")
 
-    fig.suptitle(f"{label} misalignment overview", fontsize=10, y=0.98)
-    fig.text(
-        0.02,
-        0.02,
-        f"Runs: {n_runs}  |  Turns: {n_turns}  |  Overall rate: {overall_rate:.1%}",
-        fontsize=7,
-        color=PALETTE["muted"],
-    )
-
     for ax in (ax_heat, ax_rate, ax_hist):
         _soften_spines(ax)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.9, bottom=0.12)
+    fig.subplots_adjust(left=0.075, right=0.985, top=0.86, bottom=0.11)
     fig.savefig(output_path)
     plt.close(fig)
 
@@ -289,25 +328,26 @@ def plot_circos(
     data: np.ndarray, turns: List[int], label: str, output_path: Path
 ) -> None:
     n_runs, n_turns = data.shape
-    rate_per_turn = data.mean(axis=0)
-    overall_rate = float(data.mean())
+    alignment_rate_per_turn = 1.0 - data.mean(axis=0)
+    overall_alignment_rate = float(alignment_rate_per_turn.mean())
 
-    fig = plt.figure(figsize=(6.2, 6.2))
+    fig = plt.figure(figsize=(8.6, 8.6))
     ax = fig.add_subplot(111, projection="polar")
     ax.set_theta_direction(-1)
     ax.set_theta_zero_location("N")
 
     theta_edges = np.linspace(0, 2 * np.pi, n_turns + 1)
-    r_edges = np.linspace(0.18, 1.0, n_runs + 1)
+    # Reduce the inner hole so the circular heatmap occupies more of the figure.
+    r_edges = np.linspace(0.08, 1.0, n_runs + 1)
     theta_centers = (theta_edges[:-1] + theta_edges[1:]) / 2
 
     cmap = ListedColormap([PALETTE["aligned"], PALETTE["misaligned"]])
     norm = BoundaryNorm([0, 0.5, 1.0], cmap.N)
     ax.pcolormesh(theta_edges, r_edges, data, cmap=cmap, norm=norm, shading="auto")
 
-    # Outer track: misalignment rate by turn
-    r_base = 1.03
-    r_line = r_base + 0.18 * rate_per_turn
+    # Outer track: alignment rate by turn
+    r_base = 1.02
+    r_line = r_base + 0.16 * alignment_rate_per_turn
     ax.plot(theta_centers, r_line, color=PALETTE["rate"], lw=1.3)
     ax.fill_between(
         theta_centers,
@@ -323,41 +363,20 @@ def plot_circos(
     ax.set_xticks([theta_centers[i] for i in tick_positions])
     ax.set_xticklabels([str(turns[i]) for i in tick_positions], fontsize=7)
     ax.set_yticks([])
+    ax.set_ylim(0.0, 1.2)
     ax.grid(False)
+    ax.set_position([0.06, 0.12, 0.78, 0.78])
 
-    legend_handles = [
-        Patch(facecolor=PALETTE["misaligned"], label="Misaligned"),
-        Patch(facecolor=PALETTE["aligned"], label="Aligned"),
-        Patch(facecolor=PALETTE["rate"], label="Rate"),
-    ]
-    ax.legend(
-        handles=legend_handles,
-        loc="upper right",
-        bbox_to_anchor=(1.12, 1.1),
-        frameon=False,
-        fontsize=7,
-        handlelength=1.0,
-    )
-
-    fig.text(
-        0.5,
-        0.04,
-        f"{label} | Runs: {n_runs} | Turns: {n_turns} | Overall rate: {overall_rate:.1%}",
-        ha="center",
-        fontsize=7,
-        color=PALETTE["muted"],
-    )
     fig.text(
         0.5,
         0.015,
-        "Heatmap: run x turn (red=misaligned). Outer line: misalignment rate by turn.",
+        "Heatmap: run x turn (red=misaligned). Outer line: alignment rate by turn.",
         ha="center",
-        fontsize=6,
+        fontsize=7,
         color=PALETTE["muted"],
     )
-    fig.suptitle(f"{label} misalignment overview", fontsize=10, y=0.98)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.96, bottom=0.09)
     fig.savefig(output_path)
     plt.close(fig)
 
@@ -400,56 +419,84 @@ def _segment_links(data: np.ndarray) -> Counter[Tuple[int, int]]:
     return counts
 
 
-def _bin_runs(data: np.ndarray, bins: int) -> np.ndarray:
-    n_runs = data.shape[0]
-    bins = max(1, min(bins, n_runs))
-    edges = np.linspace(0, n_runs, bins + 1, dtype=int)
-    binned = []
-    for i in range(bins):
-        lo, hi = edges[i], edges[i + 1]
-        if hi <= lo:
+def _first_recovery_counts_by_bin(
+    data: np.ndarray,
+    edges: np.ndarray,
+) -> Tuple[np.ndarray, int]:
+    counts = np.zeros(len(edges) - 1, dtype=float)
+    unresolved = 0
+    for row in data:
+        first_idx = None
+        for idx, val in enumerate(row):
+            if val:
+                first_idx = idx
+                break
+        if first_idx is None:
             continue
-        binned.append(data[lo:hi].mean(axis=0))
-    return np.vstack(binned) if binned else data.mean(axis=0, keepdims=True)
+        recovery_idx = None
+        for idx in range(first_idx + 1, len(row)):
+            if row[idx] == 0:
+                recovery_idx = idx
+                break
+        if recovery_idx is None:
+            unresolved += 1
+            continue
+        counts[_turn_to_bin(recovery_idx + 1, edges)] += 1
+    return counts, unresolved
 
 
-def _filter_links(
-    counts: Counter[Tuple[int, int]],
+def _segment_duration_by_bin(
+    data: np.ndarray,
+    edges: np.ndarray,
+) -> np.ndarray:
+    duration_sum = np.zeros(len(edges) - 1, dtype=float)
+    duration_count = np.zeros(len(edges) - 1, dtype=float)
+
+    for row in data:
+        start = None
+        for idx, val in enumerate(row):
+            if val and start is None:
+                start = idx
+            if start is not None and (not val or idx == len(row) - 1):
+                end = idx if val else idx - 1
+                if end >= start:
+                    duration = end - start + 1
+                    bin_idx = _turn_to_bin(start + 1, edges)
+                    duration_sum[bin_idx] += duration
+                    duration_count[bin_idx] += 1
+                start = None
+
+    out = np.zeros(len(edges) - 1, dtype=float)
+    mask = duration_count > 0
+    out[mask] = duration_sum[mask] / duration_count[mask]
+    return out
+
+
+def _turn_bin_edges(n_turns: int, bins: int) -> np.ndarray:
+    bins = max(1, min(bins, n_turns))
+    return np.linspace(0, n_turns, bins + 1, dtype=int)
+
+
+def _turn_to_bin(turn: int, edges: np.ndarray) -> int:
+    zero_based_turn = max(0, turn - 1)
+    return int(np.searchsorted(edges, zero_based_turn, side="right") - 1)
+
+
+def _draw_fan_legend(
+    ax: plt.Axes,
+    tracks: List[Tuple[str, float, float, str]],
     *,
-    min_count: int,
-    max_links: int,
-) -> List[Tuple[int, int, int]]:
-    items = [
-        (start, end, count)
-        for (start, end), count in counts.items()
-        if count >= min_count and start != end
-    ]
-    items.sort(key=lambda x: x[2], reverse=True)
-    if max_links and len(items) > max_links:
-        items = items[:max_links]
-    return items
-
-
-def _add_circos_track_legend(fig: plt.Figure, *, include_links: bool) -> None:
-    ax = fig.add_axes([0.6, 0.02, 0.26, 0.26])
+    start_angle: float = 122.5,
+    end_angle: float = 57.5,
+    font_size: float = 7.5,
+    font_weight: str = "normal",
+) -> None:
     ax.set_aspect("equal")
     ax.axis("off")
-    ax.set_xlim(-1.05, 1.35)
-    ax.set_ylim(-1.05, 1.05)
+    ax.set_xlim(-1.02, 1.62)
+    ax.set_ylim(0.0, 1.02)
 
     center = (0.0, 0.0)
-    start_angle = 120
-    end_angle = 60
-
-    tracks = [
-        ("Axis (turn)", 0.82, 0.98, PALETTE["aligned"]),
-        ("Misalignment rate", 0.66, 0.80, PALETTE["rate"]),
-        ("First misalignment", 0.50, 0.64, PALETTE["misaligned"]),
-        ("Run-binned heatmap", 0.34, 0.48, "#f2dcd8"),
-    ]
-    if include_links:
-        tracks.append(("Links (blue/red)", 0.18, 0.32, "#e6edf5"))
-
     anchor_x = (
         max(r_outer for _, _, r_outer, _ in tracks) * np.cos(np.deg2rad(end_angle))
         + 0.12
@@ -477,11 +524,52 @@ def _add_circos_track_legend(fig: plt.Figure, *, include_links: bool) -> None:
             label,
             ha="left",
             va="center",
-            fontsize=10,
+            fontsize=font_size,
+            fontweight=font_weight,
             color=PALETTE["muted"],
         )
 
-    # Links are explained by label only; no line samples.
+
+def _add_circos_track_legend(
+    fig: plt.Figure,
+    *,
+    box: Tuple[float, float, float, float] = (0.84, 0.07, 0.14, 0.14),
+) -> None:
+    ax = fig.add_axes(box)
+
+    tracks = [
+        ("Axis (turn)", 0.82, 0.98, PALETTE["aligned"]),
+        ("Turn-wise Alignment Score", 0.64, 0.80, PALETTE["rate"]),
+        ("First misalignment", 0.48, 0.62, PALETTE["misaligned"]),
+        ("Recovery Frequency", 0.32, 0.46, PALETTE["hist"]),
+        ("Mean Segment Duration", 0.16, 0.30, PALETTE["accent"]),
+    ]
+    _draw_fan_legend(ax, tracks)
+
+
+def save_circos_legend(output_path: Path) -> None:
+    fig = plt.figure(figsize=(2.8, 1.45))
+    ax = fig.add_axes((0.02, 0.08, 0.96, 0.84))
+    tracks = [
+        ("Aligned", 0.68, 0.84, PALETTE["aligned"]),
+        ("Misaligned", 0.48, 0.64, PALETTE["misaligned"]),
+        ("Alignment Rate", 0.28, 0.44, PALETTE["rate"]),
+    ]
+    _draw_fan_legend(ax, tracks, font_size=7.2)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path)
+    plt.close(fig)
+
+
+def save_circos_classic_legend(output_path: Path) -> None:
+    fig = plt.figure(figsize=(3.25, 1.75))
+    _add_circos_track_legend(
+        fig,
+        box=(0.02, 0.06, 0.96, 0.88),
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path)
+    plt.close(fig)
 
 
 def plot_circos_classic(
@@ -493,7 +581,7 @@ def plot_circos_classic(
     link_mode: str,
     min_link_count: int,
     max_links: int,
-    run_bins: int,
+    link_bins: int,
 ) -> None:
     try:
         from pycirclize import Circos
@@ -504,6 +592,9 @@ def plot_circos_classic(
 
     n_runs, n_turns = data.shape
     sector_name = "Turns"
+    bin_edges = _turn_bin_edges(n_turns, link_bins)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+    bin_widths = np.maximum(0.9, 0.82 * (bin_edges[1:] - bin_edges[:-1]))
     circos = Circos(
         {sector_name: n_turns},
         start=-90,
@@ -514,15 +605,17 @@ def plot_circos_classic(
     sector = circos.sectors[0]
 
     x = np.arange(n_turns) + 0.5
-    rate_per_turn = data.mean(axis=0)
+    alignment_rate_per_turn = 1.0 - data.mean(axis=0)
     first_counts = np.zeros(n_turns, dtype=float)
     for row in data:
         for idx, val in enumerate(row):
             if val:
                 first_counts[idx] += 1
                 break
+    recovery_counts, unresolved = _first_recovery_counts_by_bin(data, bin_edges)
+    segment_duration = _segment_duration_by_bin(data, bin_edges)
 
-    axis_track = sector.add_track((94, 100))
+    axis_track = sector.add_track((96, 100))
     axis_track.axis(fc=PALETTE["aligned"], ec=PALETTE["grid"], lw=0.6)
     step = max(5, int(round(n_turns / 8)))
     tick_idx = list(range(0, n_turns, step))
@@ -537,11 +630,11 @@ def plot_circos_classic(
         text_kws=dict(color=PALETTE["muted"]),
     )
 
-    rate_track = sector.add_track((82, 92), r_pad_ratio=0.06)
+    rate_track = sector.add_track((81, 94), r_pad_ratio=0.05)
     rate_track.axis(ec=PALETTE["grid"], lw=0.4)
     rate_track.line(
         x,
-        rate_per_turn,
+        alignment_rate_per_turn,
         vmin=0,
         vmax=1,
         color=PALETTE["rate"],
@@ -549,7 +642,7 @@ def plot_circos_classic(
     )
     rate_track.fill_between(
         x,
-        rate_per_turn,
+        alignment_rate_per_turn,
         y2=0,
         vmin=0,
         vmax=1,
@@ -566,9 +659,9 @@ def plot_circos_classic(
         text_kws=dict(color=PALETTE["muted"]),
     )
 
-    bar_track = sector.add_track((68, 80), r_pad_ratio=0.08)
-    bar_track.axis(ec=PALETTE["grid"], lw=0.4)
-    bar_track.bar(
+    first_track = sector.add_track((68, 79), r_pad_ratio=0.05)
+    first_track.axis(ec=PALETTE["grid"], lw=0.4)
+    first_track.bar(
         x,
         first_counts,
         vmin=0,
@@ -578,139 +671,191 @@ def plot_circos_classic(
         ec="white",
         lw=0.3,
     )
-    bar_track.yticks(
+    first_track.yticks(
         [0, float(first_counts.max())],
         labels=["0", f"{int(first_counts.max())}"],
         vmin=0,
         vmax=max(1, float(first_counts.max())),
-        label_size=7,
+        label_size=6.5,
         line_kws=dict(ec=PALETTE["grid"], lw=0.4),
         text_kws=dict(color=PALETTE["muted"]),
     )
 
-    heat_track = sector.add_track((50, 66), r_pad_ratio=0.02)
-    heat_track.axis(ec=PALETTE["grid"], lw=0.4)
-    binned = _bin_runs(data, run_bins)
-    cmap = LinearSegmentedColormap.from_list(
-        "misalign",
-        ["#ffffff", PALETTE["misaligned"]],
-    )
-    heat_track.heatmap(
-        binned,
+    recovery_track = sector.add_track((50, 66), r_pad_ratio=0.05)
+    recovery_track.axis(ec=PALETTE["grid"], lw=0.4)
+    recovery_track.bar(
+        bin_centers,
+        recovery_counts,
         vmin=0,
-        vmax=1,
-        cmap=cmap,
-        rect_kws=dict(ec="white", lw=0.2),
+        vmax=max(1, float(recovery_counts.max())),
+        width=bin_widths,
+        color=PALETTE["hist"],
+        ec="white",
+        lw=0.3,
+    )
+    recovery_track.yticks(
+        [0, float(recovery_counts.max())] if recovery_counts.max() > 0 else [0, 1],
+        labels=["0", f"{int(recovery_counts.max())}"] if recovery_counts.max() > 0 else ["0", "1"],
+        vmin=0,
+        vmax=max(1, float(recovery_counts.max())),
+        label_size=6.2,
+        line_kws=dict(ec=PALETTE["grid"], lw=0.35),
+        text_kws=dict(color=PALETTE["muted"]),
     )
 
-    def _interval(turn: int) -> Tuple[float, float]:
-        start = max(0.0, float(turn - 1))
-        end = min(float(n_turns), float(turn))
-        return start, end
+    duration_track = sector.add_track((32, 48), r_pad_ratio=0.05)
+    duration_track.axis(ec=PALETTE["grid"], lw=0.4)
+    duration_track.bar(
+        bin_centers,
+        segment_duration,
+        vmin=0,
+        vmax=max(1, float(segment_duration.max())),
+        width=bin_widths,
+        color=PALETTE["accent"],
+        ec="white",
+        lw=0.3,
+    )
+    duration_track.yticks(
+        [0, float(segment_duration.max())] if segment_duration.max() > 0 else [0, 1],
+        labels=[ "0", f"{segment_duration.max():.1f}" ] if segment_duration.max() > 0 else ["0", "1"],
+        vmin=0,
+        vmax=max(1, float(segment_duration.max())),
+        label_size=6.2,
+        line_kws=dict(ec=PALETTE["grid"], lw=0.35),
+        text_kws=dict(color=PALETTE["muted"]),
+    )
 
-    if link_mode in ("first-recovery", "both"):
-        counts, unresolved = _first_recovery_links(data)
-        links = _filter_links(
-            counts,
-            min_count=min_link_count,
-            max_links=max_links,
+    if unresolved:
+        circos.text(
+            f"No recovery: {unresolved}",
+            r=22,
+            deg=215,
+            size=6.2,
+            color=PALETTE["muted"],
+            ha="left",
+            va="center",
         )
-        max_count = max((c for _, _, c in links), default=1)
-        for start, end, count in links:
-            alpha = 0.08 + 0.42 * (count / max_count)
-            circos.link(
-                (sector_name, *_interval(start)),
-                (sector_name, *_interval(end)),
-                color=to_rgba(PALETTE["rate"], alpha),
-                ec="none",
-                lw=0,
-            )
-        if unresolved:
-            circos.text(
-                f"No recovery: {unresolved}",
-                r=46,
-                deg=0,
-                size=7,
-                color=PALETTE["muted"],
-                ha="left",
-                va="center",
-            )
-
-    if link_mode in ("segments", "both"):
-        seg_counts = _segment_links(data)
-        links = _filter_links(
-            seg_counts,
-            min_count=min_link_count,
-            max_links=max_links,
-        )
-        max_count = max((c for _, _, c in links), default=1)
-        for start, end, count in links:
-            alpha = 0.06 + 0.36 * (count / max_count)
-            circos.link(
-                (sector_name, *_interval(start)),
-                (sector_name, *_interval(end)),
-                color=to_rgba(PALETTE["misaligned"], alpha),
-                ec="none",
-                lw=0,
-            )
 
     fig = circos.plotfig()
     w, h = fig.get_size_inches()
-    fig.set_size_inches(w, h)
-    fig.subplots_adjust(right=0.74)
-    fig.suptitle(f"{label} misalignment overview", fontsize=20, y=0.9)
-    fig.text(
-        0.5,
-        0.015,
-        f"Runs: {n_runs} | Turns: {n_turns} | Overall rate: {rate_per_turn.mean():.1%}",
-        ha="center",
-        fontsize=15,
-        fontweight="semibold",
-        color=PALETTE["ink"],
-    )
-    _add_circos_track_legend(
-        fig,
-        include_links=link_mode in ("first-recovery", "segments", "both"),
-    )
+    fig.set_size_inches(w * 1.18, h * 1.18)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.96, bottom=0.03)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.set_constrained_layout(False)
     fig.set_tight_layout(False)
-    fig.savefig(output_path, bbox_inches=None)
+    fig.savefig(output_path)
     plt.close(fig)
 
 
 def plot_comparison(
-    series: Iterable[Tuple[str, List[int], np.ndarray]], output_path: Path
+    series: Iterable[Tuple[str, List[int], np.ndarray]],
+    output_path: Path,
+    *,
+    legend_position: str = "right",
 ) -> None:
-    fig, ax = plt.subplots(figsize=(6.6, 3.4))
-    series_list = list(series)
-    colors = series_colors(len(series_list))
-    for (label, turns, rate), color in zip(series_list, colors):
-        ax.plot(turns, rate, lw=1.6, label=label, color=color)
-    ax.set_title("Misalignment rate comparison")
-    ax.set_xlabel("Turn")
-    ax.set_ylabel("Rate")
-    ax.set_ylim(0, 1)
-    ax.yaxis.set_major_formatter(PercentFormatter(1.0))
-    ax.yaxis.set_major_locator(MaxNLocator(5))
-    ax.grid(True, axis="y", color=PALETTE["grid"], alpha=0.6, linestyle="-")
-    ax.legend(frameon=False, fontsize=7, ncol=1)
-    _soften_spines(ax)
+    with plt.rc_context(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": [
+                "Helvetica",
+                "Arial",
+                "Nimbus Sans",
+                "DejaVu Sans",
+            ],
+            "mathtext.fontset": "dejavusans",
+        }
+    ):
+        fig, ax = plt.subplots(figsize=(8.8, 4.8))
+        series_list = list(series)
+        colors = series_colors(len(series_list))
+        offsets = np.linspace(-0.18, 0.18, len(series_list)) if series_list else []
+        max_turn = max((max(turns) for _, turns, _ in series_list), default=1)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(output_path)
-    plt.close(fig)
+        for (label, turns, rate), color, offset in zip(series_list, colors, offsets):
+            x = np.asarray(turns, dtype=float)
+            y = np.asarray(rate, dtype=float)
+            x_offset = x + offset
+            ax.plot(
+                x,
+                y,
+                lw=0.85,
+                alpha=0.55,
+                color=color,
+                label=label,
+                zorder=2,
+            )
+            ax.scatter(
+                x_offset,
+                y,
+                s=9,
+                alpha=0.95,
+                facecolors="white",
+                edgecolors=color,
+                linewidths=0.8,
+                zorder=3,
+            )
+
+        ax.set_title("Turn-wise Alignment Score")
+        ax.set_xlabel("Turn")
+        ax.set_ylabel("Alignment rate")
+        ax.set_ylim(0, 1)
+        ax.set_xlim(0.5, max_turn + 0.6)
+        ax.yaxis.set_major_formatter(PercentFormatter(1.0))
+        ax.yaxis.set_major_locator(MaxNLocator(5))
+        ax.grid(True, axis="y", color=PALETTE["grid"], alpha=0.6, linestyle="-")
+        _soften_spines(ax)
+        if legend_position == "bottom":
+            ax.legend(
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.11),
+                ncol=max(1, len(series_list)),
+                frameon=False,
+                fontsize=8,
+                handlelength=2.0,
+                labelspacing=0.6,
+                columnspacing=1.0,
+                borderaxespad=0.0,
+            )
+        else:
+            ax.legend(
+                loc="center left",
+                bbox_to_anchor=(1.01, 0.5),
+                ncol=1,
+                frameon=False,
+                fontsize=8,
+                handlelength=2.0,
+                labelspacing=0.6,
+                borderaxespad=0.0,
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if legend_position == "bottom":
+            fig.tight_layout(rect=(0, 0.03, 1, 1), pad=1.2)
+        else:
+            fig.tight_layout(rect=(0, 0, 0.84, 1), pad=1.2)
+        fig.savefig(output_path)
+        plt.close(fig)
 
 
 def main() -> None:
     args = parse_args()
     set_nature_style()
+    set_times_new_roman_style()
 
     inputs = [Path(p) for p in args.inputs]
     for path in inputs:
         if not path.exists():
             raise SystemExit(f"[ERR] File not found: {path}")
+
+    legend_output: Path | None = None
+    if args.style == "circos":
+        legend_output = args.output_dir / "legend_circos.png"
+        save_circos_legend(legend_output)
+        print(f"[INFO] Saved legend to {legend_output}")
+    elif args.style == "circos-classic":
+        legend_output = args.output_dir / "legend_circos_classic.png"
+        save_circos_classic_legend(legend_output)
+        print(f"[INFO] Saved legend to {legend_output}")
 
     dashboards: List[Tuple[str, List[int], np.ndarray]] = []
     for path in inputs:
@@ -734,15 +879,19 @@ def main() -> None:
                 link_mode=args.link_mode,
                 min_link_count=args.min_link_count,
                 max_links=args.max_links,
-                run_bins=args.run_bins,
+                link_bins=args.link_bins,
             )
         else:
             plot_circos(data, turns, label, output_path)
-        dashboards.append((label, turns, data.mean(axis=0)))
+        dashboards.append((label, turns, 1.0 - data.mean(axis=0)))
         print(f"[INFO] Saved figure to {output_path}")
 
     if args.compare_output and len(dashboards) > 1:
-        plot_comparison(dashboards, args.compare_output)
+        plot_comparison(
+            dashboards,
+            args.compare_output,
+            legend_position=args.compare_legend_position,
+        )
         print(f"[INFO] Saved comparison plot to {args.compare_output}")
 
 

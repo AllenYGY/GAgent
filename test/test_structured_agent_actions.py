@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import pytest
 
-from app.config import get_graph_rag_settings, get_search_settings
+from app.config import get_search_settings
 from app.routers.chat_routes import StructuredChatAgent
 from app.services.llm.structured_response import (
     LLMAction,
@@ -573,9 +573,9 @@ async def test_tool_operation_graph_rag(monkeypatch, plan_repo):
             order=1,
             parameters={
                 "query": "噬菌体如何感染细菌？",
+                "mode": "local",
                 "top_k": 15,
                 "hops": 2,
-                "focus_entities": ["噬菌体", "细菌"],
             },
         )
     ]
@@ -593,11 +593,14 @@ async def test_tool_operation_graph_rag(monkeypatch, plan_repo):
             "query": kwargs["query"],
             "success": True,
             "result": {
-                "prompt": "prompt",
-                "triples": [
-                    {"entity1": "噬菌体", "relation": "感染", "entity2": "细菌"}
-                ],
-                "metadata": {"top_k": kwargs["top_k"], "hops": kwargs["hops"]},
+                "backend": "multirag",
+                "mode": kwargs["mode"],
+                "response": "回答：噬菌体通过识别宿主表面受体感染细菌。",
+                "trace": {
+                    "final_path": "merged",
+                    "graphrag": "fallback_graph",
+                    "vectorrag": "used",
+                },
             },
         }
 
@@ -615,9 +618,13 @@ async def test_tool_operation_graph_rag(monkeypatch, plan_repo):
     assert step.success is True
     details = step.details
     assert details["tool"] == "graph_rag"
-    assert details["result"]["triples"][0]["entity1"] == "噬菌体"
-    assert captured_params["top_k"] <= get_graph_rag_settings().max_top_k
-    assert captured_params["hops"] <= get_graph_rag_settings().max_hops
+    assert details["result"]["response"].startswith("回答")
+    assert details["result"]["mode"] == "local"
+    assert details["result"]["trace"]["final_path"] == "merged"
+    assert captured_params == {
+        "query": "噬菌体如何感染细菌？",
+        "mode": "local",
+    }
 
 
 class _StubExecutorLLM(PlanExecutorLLMService):

@@ -9,7 +9,9 @@ from typing import Optional
 try:
     from dotenv import load_dotenv  # type: ignore
 
-    load_dotenv(override=True)
+    _skip = os.getenv("SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes", "on", "y"}
+    if not _skip:
+        load_dotenv(override=True)
 except Exception:
     pass
 
@@ -114,6 +116,27 @@ class AppSettings:
             "GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
         )
         self.gemini_model: str = _env_str("GEMINI_MODEL", "gemini-2.5-flash")
+
+        # Custom OpenAI-compatible gateway
+        self.custom_wxx_api_key: Optional[str] = _env_first(
+            ["CUSTOM_WXX_API_KEY", "OPENAI_COMPAT_API_KEY"],
+            "sk-5cc515423d064bfda6f7e18ff433a6c1",
+        )
+        self.custom_wxx_api_url: str = (
+            _env_first(
+                ["CUSTOM_WXX_API_URL", "OPENAI_COMPAT_API_URL"],
+                "https://trial-units-sms-leeds.trycloudflare.com/v1",
+            )
+            or "https://trial-units-sms-leeds.trycloudflare.com/v1"
+        )
+        self.custom_wxx_model: str = (
+            _env_first(["CUSTOM_WXX_MODEL", "OPENAI_COMPAT_MODEL"], "gemini-3-flash")
+            or "gemini-3-flash"
+        )
+        # Backward compatibility alias
+        self.openai_compat_api_key: Optional[str] = self.custom_wxx_api_key
+        self.openai_compat_api_url: str = self.custom_wxx_api_url
+        self.openai_compat_model: str = self.custom_wxx_model
 
         # QWEN
         self.qwen_api_key: Optional[str] = os.getenv("QWEN_API_KEY")

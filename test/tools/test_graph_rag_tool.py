@@ -1,94 +1,304 @@
 from __future__ import annotations
 
-import csv
-from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
+import httpx
 import pytest
 
 from app.config import get_graph_rag_settings, reset_graph_rag_settings_cache
-from tool_box.tools_impl.graph_rag import graph_rag_handler
-from tool_box.tools_impl.graph_rag.service import reset_graph_rag_service
+from tool_box.cache import ToolCache
+from tool_box.tools_impl import graph_rag as graph_module
+from tool_box.tools_impl.graph_rag.service import (
+    check_graph_rag_health,
+    reset_graph_rag_service,
+)
+
+
+class _FakeResponse:
+    def __init__(
+        self,
+        status_code: int,
+        json_data: Any = None,
+        *,
+        text: str = "",
+    ) -> None:
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = text or ("" if json_data is None else str(json_data))
+
+    @property
+    def content(self) -> bytes:
+        return self.text.encode("utf-8")
+
+    def json(self) -> Any:
+        return self._json_data
+
+
+class _FakeAsyncClient:
+    def __init__(
+        self,
+        *,
+        timeout: float,
+        responses: List[Any],
+        calls: List[Dict[str, Any]],
+    ) -> None:
+        self.timeout = timeout
+        self._responses = responses
+        self._calls = calls
+
+    async def __aenter__(self) -> "_FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    async def get(self, url: str, **kwargs: Any) -> Any:
+        self._calls.append({
+            "method": "GET",
+            "url": url,
+            "kwargs": kwargs,
+            "timeout": self.timeout,
+        })
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    async def post(self, url: str, **kwargs: Any) -> Any:
+        self._calls.append({
+            "method": "POST",
+            "url": url,
+            "kwargs": kwargs,
+            "timeout": self.timeout,
+        })
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+@pytest.fixture(autouse=True)
+def _reset_graph_rag_env(monkeypatch):
+    monkeypatch.delenv("MULTIRAG_BASE_URL", raising=False)
+    monkeypatch.delenv("MULTIRAG_API_KEY", raising=False)
+    monkeypatch.delenv("MULTIRAG_QUERY_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("MULTIRAG_HEALTH_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("MULTIRAG_HEALTH_CACHE_TTL", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_CACHE_TTL", raising=False)
+    reset_graph_rag_settings_cache()
+    reset_graph_rag_service()
+    yield
+    reset_graph_rag_settings_cache()
+    reset_graph_rag_service()
 
 
 @pytest.fixture()
-def triples_file(tmp_path: Path, monkeypatch) -> Path:
-    file_path = tmp_path / "triples.csv"
-    with file_path.open("w", newline="", encoding="utf-8") as fp:
-        writer = csv.DictWriter(
-            fp,
-            fieldnames=[
-                "entity1",
-                "entity1_type",
-                "relation",
-                "entity2",
-                "entity2_type",
-                "pdf_name",
-                "source",
-            ],
-        )
-        writer.writeheader()
-        writer.writerow(
-            {
-                "entity1": "噬菌体",
-                "entity1_type": "Phage",
-                "relation": "感染",
-                "entity2": "细菌",
-                "entity2_type": "Bacteria",
-                "pdf_name": "paper_1.pdf",
-                "source": "文献A",
-            }
-        )
-        writer.writerow(
-            {
-                "entity1": "噬菌体",
-                "entity1_type": "Phage",
-                "relation": "依赖",
-                "entity2": "宿主",
-                "entity2_type": "Host",
-                "pdf_name": "paper_2.pdf",
-                "source": "文献B",
-            }
-        )
+def isolated_graph_cache(monkeypatch):
+    cache = ToolCache()
 
-    monkeypatch.setenv("GRAPH_RAG_TRIPLES_PATH", str(file_path))
-    reset_graph_rag_settings_cache()
-    reset_graph_rag_service()
-    return file_path
+    async def _fake_get_memory_cache() -> ToolCache:
+        return cache
+
+    monkeypatch.setattr(graph_module, "get_memory_cache", _fake_get_memory_cache)
+    return cache
+
+
+def _patch_async_client(monkeypatch, responses: List[Any], calls: List[Dict[str, Any]]) -> None:
+    def _factory(*args: Any, **kwargs: Any) -> _FakeAsyncClient:
+        timeout = kwargs.get("timeout", 0.0)
+        return _FakeAsyncClient(timeout=timeout, responses=responses, calls=calls)
+
+    monkeypatch.setattr("tool_box.tools_impl.graph_rag.service.httpx.AsyncClient", _factory)
 
 
 @pytest.mark.asyncio
-async def test_graph_rag_handler_success(triples_file: Path):
-    result = await graph_rag_handler(query="噬菌体如何感染细菌？", top_k=5, hops=1)
-    assert result["success"] is True
-    payload = result["result"]
-    assert payload["metadata"]["top_k"] <= get_graph_rag_settings().max_top_k
-    assert payload["metadata"]["triple_count"] >= 1
-    assert isinstance(payload["prompt"], str) and payload["prompt"]
-    assert payload["triples"][0]["entity1"] == "噬菌体"
-
-
-@pytest.mark.asyncio
-async def test_graph_rag_handler_focus_entities(triples_file: Path):
-    result = await graph_rag_handler(
-        query="噬菌体与宿主交互",
-        focus_entities=["宿主"],
-        top_k=5,
-        hops=0,
-    )
-    assert result["success"] is True
-    triples: List[Dict[str, str]] = result["result"]["triples"]
-    assert triples[0]["entity2"] == "宿主"
-    assert result["result"]["metadata"]["focus_entities"] == ["宿主"]
-
-
-@pytest.mark.asyncio
-async def test_graph_rag_handler_missing_file(tmp_path: Path, monkeypatch):
-    missing = tmp_path / "none.csv"
-    monkeypatch.setenv("GRAPH_RAG_TRIPLES_PATH", str(missing))
-    reset_graph_rag_settings_cache()
-    reset_graph_rag_service()
-
-    result = await graph_rag_handler(query="测试")
+async def test_graph_rag_handler_requires_query(isolated_graph_cache):
+    result = await graph_module.graph_rag_handler(query="  ")
     assert result["success"] is False
-    assert result["code"] == "missing_triples"
+    assert result["code"] == "missing_query"
+
+
+@pytest.mark.asyncio
+async def test_graph_rag_handler_rejects_invalid_mode(monkeypatch, isolated_graph_cache):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://example.com")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "secret")
+    reset_graph_rag_settings_cache()
+
+    result = await graph_module.graph_rag_handler(query="test", mode="bad-mode")
+    assert result["success"] is False
+    assert result["code"] == "invalid_mode"
+
+
+@pytest.mark.asyncio
+async def test_graph_rag_handler_requires_configuration(isolated_graph_cache):
+    result = await graph_module.graph_rag_handler(query="test query")
+    assert result["success"] is False
+    assert result["code"] == "missing_config"
+
+
+@pytest.mark.asyncio
+async def test_graph_rag_handler_success_and_cache(monkeypatch, isolated_graph_cache):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "backend": "multirag",
+                "mode": "hybrid",
+                "result": "回答：batch effect 的核心处理流程",
+                "trace": {
+                    "final_path": "merged",
+                    "graphrag": "fallback_graph",
+                    "vectorrag": "used",
+                },
+            },
+        )
+    ]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    first = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
+    second = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
+
+    assert first["success"] is True
+    assert first["result"]["backend"] == "multirag"
+    assert first["result"]["mode"] == "hybrid"
+    assert first["result"]["response"].startswith("回答")
+    assert first["result"]["trace"]["final_path"] == "merged"
+    assert second["cache_hit"] is True
+    assert len(calls) == 1
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["url"] == "http://multirag.local/api/query"
+    assert calls[0]["kwargs"]["json"] == {"query": "batch effect", "mode": "hybrid"}
+    assert calls[0]["kwargs"]["headers"]["X-API-Key"] == "server-key"
+
+
+@pytest.mark.asyncio
+async def test_graph_rag_handler_does_not_cache_failures(monkeypatch, isolated_graph_cache):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [
+        _FakeResponse(503, {"success": False, "error": "upstream unavailable"}),
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "backend": "multirag",
+                "mode": "hybrid",
+                "result": "ok",
+                "trace": {"final_path": "vector_only"},
+            },
+        ),
+    ]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    first = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
+    second = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
+
+    assert first["success"] is False
+    assert first["code"] == "service_unavailable"
+    assert second["success"] is True
+    assert "cache_hit" not in second
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "payload", "expected_code"),
+    [
+        (401, {"success": False, "error": "bad key"}, "invalid_api_key"),
+        (413, {"success": False, "error": "too large"}, "request_too_large"),
+        (429, {"success": False, "error": "slow down"}, "rate_limit"),
+        (503, {"success": False, "error": "temporarily unavailable"}, "service_unavailable"),
+    ],
+)
+async def test_graph_rag_handler_maps_http_errors(
+    monkeypatch,
+    isolated_graph_cache,
+    status_code: int,
+    payload: Dict[str, Any],
+    expected_code: str,
+):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [_FakeResponse(status_code, payload)]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    result = await graph_module.graph_rag_handler(query="batch effect")
+    assert result["success"] is False
+    assert result["code"] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_graph_rag_handler_maps_timeout(monkeypatch, isolated_graph_cache):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [httpx.TimeoutException("timeout")]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    result = await graph_module.graph_rag_handler(query="batch effect")
+    assert result["success"] is False
+    assert result["code"] == "query_timeout"
+
+
+@pytest.mark.asyncio
+async def test_check_graph_rag_health_uses_get_without_api_key(monkeypatch):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "backend": "multirag",
+                "query_timeout_seconds": 300,
+            },
+        )
+    ]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    health = await check_graph_rag_health(get_graph_rag_settings())
+    assert health["success"] is True
+    assert health["backend"] == "multirag"
+    assert len(calls) == 1
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["url"] == "http://multirag.local/api/health"
+    assert "headers" not in calls[0]["kwargs"]
+
+
+@pytest.mark.asyncio
+async def test_check_graph_rag_health_is_cached(monkeypatch):
+    monkeypatch.setenv("MULTIRAG_BASE_URL", "http://multirag.local")
+    monkeypatch.setenv("MULTIRAG_API_KEY", "server-key")
+    monkeypatch.setenv("MULTIRAG_HEALTH_CACHE_TTL", "60")
+    reset_graph_rag_settings_cache()
+
+    calls: List[Dict[str, Any]] = []
+    responses: List[Any] = [
+        _FakeResponse(200, {"success": True, "backend": "multirag"}),
+    ]
+    _patch_async_client(monkeypatch, responses, calls)
+
+    settings = get_graph_rag_settings()
+    first = await check_graph_rag_health(settings)
+    second = await check_graph_rag_health(settings)
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert len(calls) == 1

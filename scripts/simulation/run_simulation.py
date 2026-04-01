@@ -150,6 +150,17 @@ async def _run(args: argparse.Namespace) -> None:
     else:
         print("Misaligned turns: (none)")
 
+    aligned_turns = [
+        turn.index
+        for turn in state.turns
+        if turn.judge and turn.judge.alignment == "aligned"
+    ]
+    if aligned_turns:
+        aligned_list = ", ".join(str(idx) for idx in aligned_turns)
+        print(f"Aligned turns: {aligned_list}")
+    else:
+        print("Aligned turns: (none)")
+
     _print_turns(state, show_raw=args.show_raw)
 
 
@@ -158,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", help="Chat session id to associate with the run.")
     parser.add_argument("--plan-id", type=int, required=True, help="Plan id to bind for context.")
     parser.add_argument("--goal", help="Improvement goal to guide the simulated user.")
-    parser.add_argument("--max-turns", type=int, default=20, help="Maximum turns to run (default 20, capped at 20).")
+    parser.add_argument("--max-turns", type=int, default=20, help="Maximum turns to run (default 20).")
     parser.add_argument(
         "--max-actions-per-turn",
         type=int,

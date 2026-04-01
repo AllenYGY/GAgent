@@ -13,7 +13,7 @@
 | `PATCH /chat/sessions/{session_id}` | 更新会话属性（名称、激活状态、绑定计划/任务、默认 Web 搜索 Provider）。 | 请求体参考 `ChatSessionUpdateRequest`；当携带 `name` 时会自动标记 `is_user_named=true`。 |
 | `POST /chat/sessions/{session_id}/autotitle` | 生成或刷新指定会话标题。 | 请求体可选 `force`、`strategy`；响应返回新标题及来源（plan/heuristic/default/user 等）。 |
 | `POST /chat/sessions/autotitle/bulk` | 批量为未命名会话生成标题。 | 可传 `session_ids` 或 `limit` 走自动选取；同样支持 `force`、`strategy`。 |
-| `GET /chat/status` | 返回聊天、分解器、执行器以及 LLM 的配置状态。 | 供前端健康面板使用。 |
+| `GET /chat/status` | 返回聊天、分解器、执行器、LLM 以及 MultiRAG/graph_rag 的配置状态。 | 供前端健康面板使用。 |
 
 ## 2. 计划/任务接口（`/plans`, `/tasks`）
 
@@ -53,5 +53,5 @@
 
 1. **统一注册**：所有路由均在 `app/routers/registry.py` 注册，请在新增/删除接口时同步更新，保持文档与实际部署一致。
 2. **鉴权约定**：如需限制匿名访问，可在注册信息中设置 `allow_anonymous=False` 并在依赖层处理；Plan 相关接口通常要求调用方携带 `plan_id`。
-3. **工具调用说明**：LLM 可通过 `tool_operation` 触发 `web_search` 或 `graph_rag`。两者的结果会写入聊天消息的 `metadata.tool_results`，前端可据此渲染翻页卡片或知识图谱。
+3. **工具调用说明**：LLM 可通过 `tool_operation` 触发 `web_search` 或 `graph_rag`。其中 `graph_rag` 当前接入的是外部 MultiRAG HTTP 服务，结果会写入聊天消息的 `metadata.tool_results`，前端据此渲染回答、模式和 trace 信息。
 4. **接口演进**：旧版 `/tasks/*`、`/plans/*` CRUD 已删除，前端如仍引用请迁移至上述新端点或结构化聊天动作。

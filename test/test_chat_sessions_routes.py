@@ -524,4 +524,5 @@ def test_chat_status_endpoint(chat_client: TestClient):
     data = resp.json()
     assert data["status"] in {"ready", "degraded"}
     assert "llm" in data and "provider" in data["llm"]
+    assert "graph_rag" in data and "configured" in data["graph_rag"]
     assert "features" in data and "structured_actions" in data["features"]

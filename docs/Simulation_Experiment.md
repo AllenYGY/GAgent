@@ -6,6 +6,7 @@
 - **action**：对数据库中的 plan_id 走 Action 模式回合评估
 
 ## plan 模式
+说明：`--max-turns` 默认 20，当前没有硬性上限（按实际传入值执行）。
 
 ### qwen / qwen3-max
 

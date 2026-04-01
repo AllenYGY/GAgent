@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import plan JSON files into a new database, run web enrich-only, and dump enriched JSON.
+Import plan JSON files into a new database, run enrichment, and dump enriched JSON.
 
 This script is configured in-code (no CLI args) so it can be reused later
 for other tool-based enrich workflows.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -33,7 +34,10 @@ DEFAULT_DB_ROOT = "data/databases_deepseek_web_enrich_from_deepseek_v2"
 DEFAULT_INPUT_PATH = "results/agent_plans_phage_deepseek/plans"
 DEFAULT_OUTPUT_DIR = "results/agent_plans_phage_deepseek_web_enriched_v2/plans"
 DEFAULT_TITLE_PREFIX = "Imported"
+DEFAULT_ENRICH_MODE = "web_enrich"
 DEFAULT_ALLOW_WEB_SEARCH = True
+DEFAULT_ALLOW_GRAPH_RAG = True
+DEFAULT_GRAPH_RAG_MODE = "hybrid"
 DEFAULT_MAX_DEPTH = None
 DEFAULT_NODE_BUDGET = None
 DEFAULT_REFACTOR_ALLOWLIST = [
@@ -205,6 +209,65 @@ def dump_plan_json(repo: PlanRepository, plan_id: int, output_dir: Path) -> Path
     return output_path
 
 
+def _plan_file_sort_key(path: Path) -> tuple[int, str]:
+    match = re.search(r"plan_(\d+)\.json$", path.name)
+    if match:
+        return int(match.group(1)), path.name
+    return sys.maxsize, path.name
+
+
+def _has_web_enriched_context(tree) -> bool:
+    for node in tree.iter_nodes():
+        if isinstance(node.context_meta, dict) and node.context_meta.get("web_search"):
+            return True
+        for section in node.context_sections or []:
+            if not isinstance(section, dict):
+                continue
+            title = str(section.get("title") or "").strip().lower()
+            if title.startswith("web"):
+                return True
+    return False
+
+
+def _run_enrichment(
+    *,
+    decomposer: PlanDecomposer,
+    repo: PlanRepository,
+    plan_id: int,
+    mode: str,
+    max_depth: Optional[int],
+    node_budget: Optional[int],
+    allow_web_search: bool,
+    allow_graph_rag: bool,
+    graph_rag_mode: str,
+):
+    if mode == "graph_rag_enrich":
+        if not allow_graph_rag:
+            raise ValueError(
+                "graph_rag_enrich requires ENRICH_ALLOW_GRAPH_RAG=true"
+            )
+        tree = repo.get_plan_tree(plan_id)
+        if not _has_web_enriched_context(tree):
+            print(
+                f"[WARN] Plan #{plan_id} does not appear to include prior web enrichment context.",
+                file=sys.stderr,
+            )
+        return decomposer.enrich_plan_with_shared_graph_rag(
+            plan_id,
+            max_depth=max_depth,
+            node_budget=node_budget,
+            graph_rag_mode=graph_rag_mode,
+        )
+
+    return decomposer.run_plan(
+        plan_id,
+        max_depth=max_depth,
+        node_budget=node_budget,
+        allow_web_search=allow_web_search,
+        web_enrich_only=True,
+    )
+
+
 def main() -> None:
     env_path = find_dotenv(usecwd=True)
     if env_path:
@@ -220,7 +283,18 @@ def main() -> None:
     input_path = Path(os.getenv("ENRICH_INPUT_PATH", DEFAULT_INPUT_PATH))
     output_dir = Path(os.getenv("ENRICH_OUTPUT_DIR", DEFAULT_OUTPUT_DIR))
     title_prefix = os.getenv("ENRICH_TITLE_PREFIX", DEFAULT_TITLE_PREFIX)
+    enrich_mode = (
+        os.getenv("ENRICH_MODE", DEFAULT_ENRICH_MODE).strip().lower()
+        or DEFAULT_ENRICH_MODE
+    )
     allow_web_search = _env_bool("ENRICH_ALLOW_WEB_SEARCH", DEFAULT_ALLOW_WEB_SEARCH)
+    allow_graph_rag = _env_bool(
+        "ENRICH_ALLOW_GRAPH_RAG", DEFAULT_ALLOW_GRAPH_RAG
+    )
+    graph_rag_mode = (
+        os.getenv("ENRICH_GRAPH_RAG_MODE", DEFAULT_GRAPH_RAG_MODE).strip().lower()
+        or DEFAULT_GRAPH_RAG_MODE
+    )
     max_depth = _env_optional_int("ENRICH_MAX_DEPTH", DEFAULT_MAX_DEPTH)
     node_budget = _env_optional_int("ENRICH_NODE_BUDGET", DEFAULT_NODE_BUDGET)
     enable_refactor = _env_bool("ENRICH_ENABLE_REFACTOR", False)
@@ -240,6 +314,14 @@ def main() -> None:
     refactor_api_key = os.getenv("REFACTOR_API_KEY")
     refactor_temperature = _env_optional_float("REFACTOR_TEMPERATURE", None)
     refactor_log_dir = os.getenv("REFACTOR_LOG_DIR")
+
+    if enrich_mode not in {"web_enrich", "graph_rag_enrich"}:
+        print(
+            f"[ERR] Unsupported ENRICH_MODE={enrich_mode!r}. "
+            "Expected one of: web_enrich, graph_rag_enrich.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     os.environ["DB_ROOT"] = db_root
 
@@ -263,7 +345,7 @@ def main() -> None:
         )
 
     if input_path.is_dir():
-        files = sorted(input_path.glob("plan_*.json"))
+        files = sorted(input_path.glob("plan_*.json"), key=_plan_file_sort_key)
     else:
         files = [input_path]
 
@@ -285,18 +367,27 @@ def main() -> None:
         print("[WARN] No plans imported. Exiting.")
         return
 
-    print("\n[INFO] Running web enrich-only on imported plans...")
+    mode_label = (
+        "web enrich-only"
+        if enrich_mode == "web_enrich"
+        else f"graph_rag enrich-only (mode={graph_rag_mode})"
+    )
+    print(f"\n[INFO] Running {mode_label} on imported plans...")
     total = len(created)
     for idx, (path, plan_id) in enumerate(created, start=1):
         print(f"[INFO] Enriching plan {idx}/{total}: {path.name} -> plan #{plan_id}")
         try:
             started = time.perf_counter()
-            result = decomposer.run_plan(
-                plan_id,
+            result = _run_enrichment(
+                decomposer=decomposer,
+                repo=repo,
+                plan_id=plan_id,
+                mode=enrich_mode,
                 max_depth=max_depth,
                 node_budget=node_budget,
                 allow_web_search=allow_web_search,
-                web_enrich_only=True,
+                allow_graph_rag=allow_graph_rag,
+                graph_rag_mode=graph_rag_mode,
             )
             elapsed = time.perf_counter() - started
             print(
@@ -304,6 +395,7 @@ def main() -> None:
                 f"(processed={len(result.processed_nodes)}, "
                 f"enriched={result.stats.get('enriched_nodes', 0)}, "
                 f"llm_calls={result.stats.get('llm_calls', 0)}, "
+                f"graph_rag_calls={result.stats.get('graph_rag_calls', 0)}, "
                 f"elapsed={elapsed:.1f}s)"
             )
         except Exception as exc:

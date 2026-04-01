@@ -9,8 +9,7 @@ This doc focuses on plan-generation ablations across planner type, tool access, 
 | llm | LLM direct | none | `scripts/generate_llm_plans.py` | Pure JSON plan generation. |
 | agent | Agent (decomposer) | none | `scripts/decomposer_plan_generator.py` | Disable web_search via env. |
 | agent_web | Agent (decomposer) | web_search | `scripts/decomposer_plan_generator.py` | Enable web_search via env. |
-| agent_rag | Agent (chat) | graph_rag | `scripts/run_structured_agent.py` | Requires prompt to call graph_rag. |
-| agent_web_rag | Agent (chat) | web_search + graph_rag | `scripts/run_structured_agent.py` | Prompt must call tools before create_plan. |
+| agent_web_rag | Agent (chat) | web_search + graph_rag | `scripts/bulk_generate_plans.py` | Extend the web-enriched setting with one extra graph_rag call before create_plan. |
 
 Model axis: run each label with different LLM models (e.g., qwen3-max, deepseek-v3) by setting provider/model env or CLI flags.
 
@@ -18,8 +17,9 @@ Model axis: run each label with different LLM models (e.g., qwen3-max, deepseek-
 
 - `web_search` is only used by the decomposer when enabled (`DECOMP_ENABLE_WEB_SEARCH=true`).
 - `graph_rag` is a chat tool; it is not called by the decomposer automatically.
-- For graph_rag ablations, use the chat-based agent and explicitly instruct tool calls in the prompt template.
-- You can run the chat agent locally via `scripts/run_structured_agent.py` (no backend).
+- We do not run a standalone `graph_rag`-only ablation anymore.
+- The combined `web_search + graph_rag` condition is defined as the web-enriched version plus one explicit `graph_rag` call before `plan_operation.create_plan`.
+- Use the chat/bulk agent path for the combined condition and instruct tool calls explicitly in the prompt template.
 
 ## LLM Plan
 
@@ -121,9 +121,57 @@ python scripts/decomposer_plan_generator.py \
     --concurrency 5
 ```
 
-### Agent With RAG
+### Agent With Web Search + GraphRAG
 
-### Agent With Web Search + RAG
+This condition extends the web-enriched agent setting. The intended comparison is:
+
+- `agent`: no external retrieval
+- `agent_web`: `web_search`
+- `agent_web_rag`: `web_search` + `graph_rag`
+
+We do not keep a separate `graph_rag`-only line in this ablation.
+
+Use a prompt template that preserves the web-enriched flow and adds one focused
+`graph_rag` lookup before plan creation.
+
+```text
+# agent_web_graph_rag.txt
+Topic: "{title}"
+Goal: {goal}
+
+This condition extends the web-enriched baseline.
+First call tool_operation.web_search with a focused query.
+Then call tool_operation.graph_rag with a focused domain query that complements the web results.
+Then call plan_operation.create_plan exactly once and confirm the plan_id.
+```
+
+#### Qwen deepseek-v3
+
+```shell
+export LLM_PROVIDER=qwen
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/bulk_generate_plans.py \
+    --input data/phage_plans.csv \
+    --prompt-template prompts/agent_web_graph_rag.txt \
+    --dump-dir results/agent_plans_phage_deepseek_web_rag \
+    --output results/agent_plans_phage_deepseek_web_rag/summary.csv \
+    --concurrency 6
+```
+
+#### Qwen qwen3-max
+
+```shell
+export LLM_PROVIDER=qwen
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=qwen3-max
+python scripts/bulk_generate_plans.py \
+    --input data/phage_plans.csv \
+    --prompt-template prompts/agent_web_graph_rag.txt \
+    --dump-dir results/agent_plans_phage_qwen_web_rag \
+    --output results/agent_plans_phage_qwen_web_rag/summary.csv \
+    --concurrency 6
+```
 
 ## Evaluation
 
@@ -224,30 +272,108 @@ python scripts/eval_plan_quality.py \
     --jsonl-output results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.jsonl
 ```
 
-### agent_plans_phage_qwen_web
+### agent_plans_phage_qwen_web_enriched_refactor_v2
 
 ```shell
 python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web_enriched_refactor_v2/plans \
     --provider qwen \
     --model qwen3-max \
     --batch-size 2 \
     --max-retries 3 \
-    --output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
-    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.jsonl
+    --output results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen.jsonl
 ```
 
 ```shell
-export QWEN_API_KEY=sk-9417e4ec0397402d8fb2732f7d295692
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
 export QWEN_MODEL=deepseek-v3
 python scripts/eval_plan_quality.py \
-    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web/plans \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web_enriched_refactor_v2/plans \
     --provider qwen \
     --model deepseek-v3 \
     --batch-size 2 \
     --max-retries 3 \
-    --output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
-    --jsonl-output results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.jsonl
+    --output results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3.jsonl
+```
+
+### agent_plans_phage_deepseek_web_enriched_refactor_v2
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web_enriched_refactor_v2/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web_enriched_refactor_v2/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3.jsonl
+```
+
+### agent_plans_phage_qwen_web_rag
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web_rag/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_qwen_web_rag/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.jsonl
+```
+
+### agent_plans_phage_deepseek_web_rag
+
+```shell
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web_rag/plans \
+    --provider qwen \
+    --model qwen3-max \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.jsonl
+```
+
+```shell
+export QWEN_API_KEY=YOUR_QWEN_API_KEY
+export QWEN_MODEL=deepseek-v3
+python scripts/eval_plan_quality.py \
+    --plan-tree-dir /Users/allenygy/Research/GAgent/results/agent_plans_phage_deepseek_web_rag/plans \
+    --provider qwen \
+    --model deepseek-v3 \
+    --batch-size 2 \
+    --max-retries 3 \
+    --output results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.csv \
+    --jsonl-output results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.jsonl
 ```
 
 ### agent_plans_phage_deepseek
@@ -278,117 +404,156 @@ python scripts/eval_plan_quality.py \
 
 ## Plotting
 
+Use the current web-enriched result folders for plotting:
+
+- `results/agent_plans_phage_qwen_web_enriched_refactor_v2`
+- `results/agent_plans_phage_deepseek_web_enriched_refactor_v2`
+
+Note:
+
+- Legacy `llm` / `agent` / `agent_web` runs currently use timestamped files such as `plan_scores_qwen_10pt_20260202_103446.csv`.
+- New `agent_web_rag` runs currently use plain filenames such as `plan_scores_qwen.csv`.
+- Because the filenames are mixed, prefer explicit `--files` lists over `--run-dirs` for the publication figures below.
+
 ### Overall
 
 ```shell
- # qwen-max 评测（plan_scores_qwen.csv）
-python scripts/plot_plan_score_bars.py \
-    --files \
-      results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
-      results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
-      results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-      results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
-      results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
-    --output results/score_bars_qwen.png
+# qwen3-max evaluator
+python scripts/plot/plot_plan_score_bars.py \
+  --files \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --output results/score_bars_qwen.png
 ```
 
 ```shell
- # deepseek-v3 评测（plan_scores_deepseekv3.csv）
-python scripts/plot_plan_score_bars.py \
-    --files \
-      results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
-      results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-      results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-      results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-      results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
-    --output results/score_bars_deepseekv3.png
+# deepseek-v3 evaluator
+python scripts/plot/plot_plan_score_bars.py \
+  --files \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --output results/score_bars_deepseekv3.png
 ```
 
 ### Violin plots (per metric)
 
 ```shell
-python scripts/plot_plan_score_boxplots.py \
+python scripts/plot/plot_plan_score_boxplots.py \
   --files \
-    results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
-    results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
-    results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
-    results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
   --output-dir results/score_boxplots_qwen
 ```
 
 ```shell
-python scripts/plot_plan_score_boxplots.py \
+python scripts/plot/plot_plan_score_boxplots.py \
   --files \
-    results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
-    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-  --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
   --output-dir results/score_boxplots_deepseekv3
-```
-
-### Demo data + plots (synthetic)
-
-```shell
-python scripts/generate_demo_ablation_data.py --with-plots
 ```
 
 ### Radar charts (per model)
 
 ```shell
-python scripts/plot_plan_score_radars.py \
-  --scores-dir results \
-  --output-dir results/score_radars
+python scripts/plot/plot_plan_score_radars.py \
+  --files \
+    results/llm_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.csv \
+  --labels \
+    llm_qwen llm_deepseek agent_qwen agent_deepseek \
+    agent_qwen_web agent_deepseek_web \
+    agent_qwen_web_rag agent_deepseek_web_rag \
+  --output-dir results/score_radars_qwen
 ```
-
-Example (restrict to five run folders + choose eval tag):
 
 ```shell
-python scripts/plot_plan_score_radars.py \
-  --run-dirs \
-    results/agent_plans_phage_qwen_web \
-    results/agent_plans_phage_deepseek \
-    results/agent_plans_phage_qwen \
-    results/llm_plans_phage_deepseek \
-    results/llm_plans_phage_qwen \
-  --eval-tag qwen \
-  --output-dir results/score_radars
+python scripts/plot/plot_plan_score_radars.py \
+  --files \
+    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.csv \
+  --labels \
+    llm_qwen llm_deepseek agent_qwen agent_deepseek \
+    agent_qwen_web agent_deepseek_web \
+    agent_qwen_web_rag agent_deepseek_web_rag \
+  --output-dir results/score_radars_deepseekv3
 ```
 
-If `--eval-tag` is omitted with `--run-dirs`, the script will run all eval tags
-shared across the run folders (e.g., `qwen`, `deepseekv3`).
+These explicit `--files` commands are recommended for the current ablation
+because legacy and new runs do not share the same score filename pattern.
 
 ### By category
 
 ```shell
-  # qwen-max 评测按类别
-  python scripts/plot_plan_score_bars_by_category.py \
-    --category-csv data/phage_plans.csv \
-    --files \
-      results/agent_plans_phage_qwen_web/eval/plan_scores_qwen.csv \
-      results/agent_plans_phage_qwen/eval/plan_scores_qwen.csv \
-      results/agent_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-      results/llm_plans_phage_qwen/eval/plan_scores_qwen.csv \
-      results/llm_plans_phage_deepseek/eval/plan_scores_qwen.csv \
-    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
-    --output-dir results/score_bars_by_category_qwen
+# qwen3-max evaluator
+python scripts/plot/plot_plan_score_bars_by_category.py \
+  --category-csv data/phage_plans.csv \
+  --files \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_qwen.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_qwen_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --output-dir results/score_bars_by_category_qwen
 ```
 
 ```shell
-  # deepseek-v3 评测按类别
-  python scripts/plot_plan_score_bars_by_category.py \
-    --category-csv data/phage_plans.csv \
-    --files \
-      results/agent_plans_phage_qwen_web/eval/plan_scores_deepseekv3.csv \
-      results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-      results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-      results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3.csv \
-      results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3.csv \
-    --labels agent_qwen_web agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
-    --output-dir results/score_bars_by_category_deepseekv3
+# deepseek-v3 evaluator
+python scripts/plot/plot_plan_score_bars_by_category.py \
+  --category-csv data/phage_plans.csv \
+  --files \
+    results/agent_plans_phage_qwen_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek_web_enriched_refactor_v2/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_qwen_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_deepseek_web_rag/eval/plan_scores_deepseekv3.csv \
+    results/agent_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/agent_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_qwen/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+    results/llm_plans_phage_deepseek/eval/plan_scores_deepseekv3_10pt_20260202_103446.csv \
+  --labels agent_qwen_web agent_deepseek_web agent_qwen_web_rag agent_deepseek_web_rag agent_qwen_max agent_deepseek_v3 llm_qwen_max llm_deepseek_v3 \
+  --output-dir results/score_bars_by_category_deepseekv3
 ```

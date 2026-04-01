@@ -62,7 +62,7 @@ LLM responses must conform to the JSON schema:
 | `decompose_task`          | `task_operation` | —                                            | `task_id`, `expand_depth`, `node_budget`, `allow_existing_children` | Expands tasks using the decomposer; omit `task_id` to target roots. |
 | `request_subgraph`        | `context_request`| `logical_id` or `task_id`                    | `max_depth`                                       | Requests additional graph detail; must be the only action in a reply. |
 | `web_search`              | `tool_operation`| `query` (string)                              | `max_results`, `locale`, `time_range`, `provider` | Calls configured web search provider并返回摘要、引用链接，结果附在回复 metadata。                                    |
-| `graph_rag`               | `tool_operation`| `query` (string)                              | `top_k`, `hops`, `return_subgraph`, `focus_entities` | 查询噬菌体/宿主知识图谱，返回三元组、提示词以及可选子图 JSON；结果同样写入 metadata。                   |
+| `graph_rag`               | `tool_operation`| `query` (string)                              | `mode` (`hybrid` / `local` / `global` / `naive`) | 调用 MultiRAG 知识检索服务，返回最终回答文本与 trace 路径信息；结果同样写入 metadata。                   |
 
 > `anchor_position` 支持 `first_child` / `last_child` / `before` / `after`。当使用 `before` 或 `after` 时，必须同时提供 `anchor_task_id`（且锚点与目标父节点一致）；否则 fallback 到默认的末尾插入。指定绝对 `position` 会跳过锚点计算，主要供调试或自动化脚本使用。旧版字段 `insert_before` / `insert_after` 仍被接受，并分别映射为 `anchor_position=before/after`。
 
@@ -107,21 +107,18 @@ Request additional context before proceeding:
 }
 ```
 
-Call Graph RAG to collect phage–host triples:
+Call Graph RAG through MultiRAG:
 
 ```json
 {
-  "llm_reply": { "message": "已检索噬菌体与宿主互作知识图谱，以下是关键关系摘要。" },
+  "llm_reply": { "message": "我将调用 MultiRAG 检索相关知识并返回最终回答。" },
   "actions": [
     {
       "kind": "tool_operation",
       "name": "graph_rag",
       "parameters": {
         "query": "How do T4 phages attach to E. coli?",
-        "top_k": 12,
-        "hops": 1,
-        "return_subgraph": true,
-        "focus_entities": ["T4 phage", "E. coli"]
+        "mode": "local"
       },
       "blocking": true,
       "order": 1

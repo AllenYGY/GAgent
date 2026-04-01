@@ -28,6 +28,9 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
       springerApi,
       springerFallbackReason,
       springerOriginalQuery,
+      graphBackend,
+      graphMode,
+      graphTrace,
       triples,
       responseText,
       promptText,
@@ -38,6 +41,7 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
       metadata,
       subgraph,
       isWebSearch,
+      isGraphRag,
       isSpringer,
     } = useMemo(() => {
       const toolValue = typeof payload.name === 'string' && payload.name ? payload.name : 'tool';
@@ -132,6 +136,11 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
       springerApi: springerApiValue,
       springerFallbackReason: springerFallbackValue,
       springerOriginalQuery: springerOriginalQueryValue,
+      graphBackend: isGraph && typeof payload.result?.backend === 'string' ? payload.result.backend : undefined,
+      graphMode: isGraph && typeof payload.result?.mode === 'string' ? payload.result.mode : undefined,
+      graphTrace: isGraph && payload.result?.trace && typeof payload.result.trace === 'object'
+        ? payload.result.trace
+        : undefined,
       responseText: response,
       promptText: isGraph && typeof payload.result?.prompt === 'string' ? payload.result.prompt : undefined,
       errorText: error,
@@ -146,6 +155,7 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
         ? payload.result.subgraph
         : undefined,
       isWebSearch: isWeb,
+      isGraphRag: isGraph,
       isSpringer: isSpringerTool,
     };
   }, [payload]);
@@ -201,6 +211,21 @@ const ToolResultCard: React.FC<ToolResultCardProps> = ({ payload, defaultOpen = 
             <Text type="secondary">
               Query: <Text code>{query}</Text>
             </Text>
+          )}
+          {isGraphRag && graphBackend && (
+            <Text type="secondary">Backend: {graphBackend}</Text>
+          )}
+          {isGraphRag && graphMode && (
+            <Text type="secondary">Mode: {graphMode}</Text>
+          )}
+          {isGraphRag && graphTrace?.final_path && (
+            <Text type="secondary">Final path: {String(graphTrace.final_path)}</Text>
+          )}
+          {isGraphRag && graphTrace?.graphrag && (
+            <Text type="secondary">GraphRAG path: {String(graphTrace.graphrag)}</Text>
+          )}
+          {isGraphRag && graphTrace?.vectorrag && (
+            <Text type="secondary">VectorRAG: {String(graphTrace.vectorrag)}</Text>
           )}
           {isSpringer && springerApi && (
             <Text type="secondary">API: {springerApi}</Text>

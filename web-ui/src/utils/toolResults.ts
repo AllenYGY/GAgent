@@ -77,6 +77,10 @@ const normalizeToolResultPayload = (raw: any): ToolResultPayload | null => {
       : undefined;
   const searchEngine = isNonEmptyString(result.search_engine) ? result.search_engine : undefined;
   const api = isNonEmptyString(result.api) ? result.api : undefined;
+  const backend = isNonEmptyString(result.backend) ? result.backend : undefined;
+  const mode = isNonEmptyString(result.mode) ? result.mode : undefined;
+  const trace =
+    result.trace && typeof result.trace === 'object' ? { ...(result.trace as Record<string, any>) } : undefined;
   const fallbackReason = isNonEmptyString(result.fallback_reason) ? result.fallback_reason : undefined;
   const originalQuery = isNonEmptyString(result.original_query) ? result.original_query : undefined;
   const recordsPreview = Array.isArray(result.records_preview) ? result.records_preview : undefined;
@@ -98,6 +102,9 @@ const normalizeToolResultPayload = (raw: any): ToolResultPayload | null => {
       ...(response ? { response } : {}),
       ...(answer ? { answer } : {}),
       ...(error ? { error } : {}),
+      ...(backend ? { backend } : {}),
+      ...(mode ? { mode } : {}),
+      ...(trace ? { trace } : {}),
       ...(totalResults !== undefined ? { total_results: totalResults } : {}),
       ...(recordCount !== undefined ? { record_count: recordCount } : {}),
       ...(api ? { api } : {}),
@@ -246,7 +253,10 @@ export const collectToolResultsFromActions = (
       name: action.name,
       parameters: action.parameters,
       summary: action.message,
-      result: action.details,
+      result:
+        action.details && typeof action.details === 'object' && 'result' in action.details
+          ? (action.details as Record<string, any>).result
+          : action.details,
     });
     if (normalized) {
       collected.push(normalized);

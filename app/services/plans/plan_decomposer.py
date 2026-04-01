@@ -185,7 +185,7 @@ class PlanDecomposer:
         "to decompose the target node into actionable subtasks. Return only JSON."
     )
     NODE_ENRICH_HEADER = (
-        "You are a plan enrichment assistant. Use web context to improve an existing "
+        "You are a plan enrichment assistant. Use available retrieval context to improve an existing "
         "task node without changing the plan structure. Return only JSON."
     )
 
@@ -410,6 +410,29 @@ class PlanDecomposer:
         parent = tree.nodes.get(node.parent_id)
         return self._collect_node_web_context(parent)
 
+    @staticmethod
+    def _upsert_context_section(
+        sections: List[Dict[str, Any]],
+        *,
+        title: str,
+        content: str,
+    ) -> List[Dict[str, Any]]:
+        normalized = PlanDecomposer._normalize_context_sections(sections)
+        target = title.strip().lower()
+        result: List[Dict[str, Any]] = []
+        inserted = False
+        for section in normalized:
+            current_title = str(section.get("title") or "").strip().lower()
+            if current_title == target:
+                if not inserted and content:
+                    result.append({"title": title, "content": content})
+                    inserted = True
+                continue
+            result.append(section)
+        if not inserted and content:
+            result.append({"title": title, "content": content})
+        return result
+
     def _apply_web_context(
         self,
         *,
@@ -423,8 +446,11 @@ class PlanDecomposer:
     ) -> None:
         if node is None or not context:
             return
-        sections = list(node.context_sections or [])
-        sections.append({"title": "web_search", "content": context})
+        sections = self._upsert_context_section(
+            list(node.context_sections or []),
+            title="web_search",
+            content=context,
+        )
         meta = dict(node.context_meta or {})
         meta["web_search"] = {
             "query": query,
@@ -439,6 +465,71 @@ class PlanDecomposer:
         )
         tree.nodes[updated.id] = updated
 
+    @staticmethod
+    def _format_graph_rag_context(
+        payload: Dict[str, Any], *, query: Optional[str] = None
+    ) -> Tuple[str, Dict[str, Any]]:
+        result = payload.get("result") or {}
+        if not isinstance(result, dict):
+            return "", {}
+
+        response = str(result.get("response") or "").strip()
+        trace = result.get("trace") if isinstance(result.get("trace"), dict) else {}
+        mode = str(result.get("mode") or payload.get("mode") or "").strip()
+        backend = str(result.get("backend") or "").strip()
+
+        lines: List[str] = []
+        if query:
+            lines.append(f"Query: {query}")
+        if response:
+            lines.append("GraphRAG findings:")
+            lines.append(f"- {response}")
+        if trace:
+            lines.append("Trace:")
+            for key, value in list(trace.items())[:6]:
+                if isinstance(value, (dict, list)):
+                    rendered = json.dumps(value, ensure_ascii=False)
+                else:
+                    rendered = str(value)
+                rendered = rendered.strip()
+                if len(rendered) > 160:
+                    rendered = rendered[:157] + "..."
+                lines.append(f"- {key}: {rendered}")
+
+        meta: Dict[str, Any] = {
+            "query": query or "",
+            "mode": mode or "",
+            "backend": backend or "",
+            "trace": trace,
+        }
+        return "\n".join(lines).strip(), meta
+
+    @staticmethod
+    def _build_plan_graph_rag_query(plan: PlanTree) -> str:
+        def _clean(text: Optional[str]) -> str:
+            return " ".join(str(text or "").split()).strip()
+
+        parts: List[str] = []
+        title = _clean(plan.title)
+        if title:
+            parts.append(title)
+
+        description = _clean(plan.description)
+        if description:
+            parts.append(description)
+        else:
+            for root_id in plan.root_node_ids():
+                root = plan.nodes.get(root_id)
+                instruction = _clean(root.instruction if root else "")
+                if instruction:
+                    parts.append(instruction)
+                    break
+
+        query = ". ".join(part for part in parts if part)
+        if len(query) > 400:
+            query = query[:397].rstrip() + "..."
+        return query or "plan graph enrichment"
+
     def _build_node_enrichment_prompt(
         self,
         *,
@@ -451,6 +542,10 @@ class PlanDecomposer:
         search_query: Optional[str],
         provider: Optional[str],
         results_count: Optional[int],
+        shared_graph_rag_context: Optional[str] = None,
+        graph_rag_query: Optional[str] = None,
+        graph_rag_mode: Optional[str] = None,
+        graph_rag_backend: Optional[str] = None,
     ) -> str:
         context_payload = {
             "combined": node.context_combined,
@@ -481,6 +576,13 @@ class PlanDecomposer:
                 [
                     "\n=== NEW WEB CONTEXT ===",
                     new_web_context,
+                ]
+            )
+        if shared_graph_rag_context:
+            prompt.extend(
+                [
+                    "\n=== SHARED GRAPHRAG CONTEXT ===",
+                    shared_graph_rag_context,
                 ]
             )
         prompt.extend(
@@ -515,13 +617,15 @@ class PlanDecomposer:
                 "- Use parent/current web context to avoid repeating the same facts.",
                 "- New web context should fill gaps (tools/versions/parameters/metrics/thresholds/data sources).",
                 "- If using new web context, include a 'web_search' section in context.sections.",
+                "- Shared GraphRAG context provides plan-level domain facts and should be applied only when it helps this node.",
+                "- If using GraphRAG context, include a 'graph_rag' section in context.sections.",
                 "- Keep summaries concise; do not paste long quotes.",
                 "- Instruction must remain a minimal executable unit; it may include up to 2 tightly coupled micro-actions only if they lead to one explicit output.",
                 "- If the output artifact is missing, add it explicitly in the instruction (e.g., '... -> output: <file/table/model>').",
                 "- Do NOT merge distinct phases (preprocess + train + evaluate) or multiple outputs/tools into one node.",
                 "- context.combined MUST include: Why (rationale), Assumption/Constraint, and Metric/Validation (if available). Keep to 1–3 sentences.",
                 "- Where possible, add Innovation & Feasibility details in context.combined or a dedicated context.sections entry: non-obvious idea, expected benefit, feasibility constraints, resource needs, risks/mitigation.",
-                "- Prefer concrete parameters/metrics from web context; if unknown, say what is missing.",
+                "- Prefer concrete parameters/metrics from available retrieval context; if unknown, say what is missing.",
                 "- If a field does not need changes, return the original value.",
             ]
         )
@@ -531,6 +635,12 @@ class PlanDecomposer:
             prompt.append(f"Search provider: {provider}")
         if results_count is not None:
             prompt.append(f"Search results count: {results_count}")
+        if graph_rag_query:
+            prompt.append(f"GraphRAG query: {graph_rag_query}")
+        if graph_rag_mode:
+            prompt.append(f"GraphRAG mode: {graph_rag_mode}")
+        if graph_rag_backend:
+            prompt.append(f"GraphRAG backend: {graph_rag_backend}")
         return "\n".join(prompt)
 
     def _parse_node_update(self, raw: Any) -> Dict[str, Any]:
@@ -589,8 +699,10 @@ class PlanDecomposer:
         query: Optional[str],
         provider: Optional[str],
         results_count: Optional[int],
+        graph_rag_context: Optional[str] = None,
+        graph_rag_meta: Optional[Dict[str, Any]] = None,
     ) -> Optional[PlanNode]:
-        if not update and not web_context:
+        if not update and not web_context and not graph_rag_context:
             return None
 
         name = update.get("name") or node.name
@@ -632,29 +744,30 @@ class PlanDecomposer:
         if "context_meta" in update and isinstance(update.get("context_meta"), dict):
             meta = dict(update.get("context_meta") or {})
 
-        if web_context:
+        if web_context or graph_rag_context:
             if sections is None:
                 sections = list(node.context_sections or [])
-            has_web_section = False
-            for sec in sections:
-                if not isinstance(sec, dict):
-                    continue
-                title = str(sec.get("title") or "").strip().lower()
-                content = str(sec.get("content") or "")
-                if title.startswith("web") and web_context in content:
-                    has_web_section = True
-                    break
-            if not has_web_section:
-                sections.append({"title": "web_search", "content": web_context})
-
             meta = dict(node.context_meta or {})
             if "context_meta" in update and isinstance(update.get("context_meta"), dict):
                 meta.update(update.get("context_meta") or {})
-            meta["web_search"] = {
-                "query": query,
-                "provider": provider,
-                "results_count": results_count or 0,
-            }
+            if web_context:
+                sections = self._upsert_context_section(
+                    sections,
+                    title="web_search",
+                    content=web_context,
+                )
+                meta["web_search"] = {
+                    "query": query,
+                    "provider": provider,
+                    "results_count": results_count or 0,
+                }
+            if graph_rag_context:
+                sections = self._upsert_context_section(
+                    sections,
+                    title="graph_rag",
+                    content=graph_rag_context,
+                )
+                meta["graph_rag"] = dict(graph_rag_meta or {})
 
         updated = self._repo.update_task(
             plan_id,
@@ -669,6 +782,244 @@ class PlanDecomposer:
         )
         tree.nodes[updated.id] = updated
         return updated
+
+    def enrich_plan_with_shared_graph_rag(
+        self,
+        plan_id: int,
+        *,
+        max_depth: Optional[int] = None,
+        node_budget: Optional[int] = None,
+        graph_rag_mode: str = "hybrid",
+    ) -> DecompositionResult:
+        tree = self._repo.get_plan_tree(plan_id)
+        depth_limit = max_depth if max_depth is not None else self._settings.max_depth
+        budget_limit = (
+            node_budget if node_budget is not None else self._settings.total_node_budget
+        )
+        queue: Deque[QueueItem] = deque(
+            QueueItem(node_id=root_id, relative_depth=0) for root_id in tree.root_node_ids()
+        )
+        root_reference = queue[0].node_id if queue else None
+
+        if tree.is_empty():
+            return DecompositionResult(
+                plan_id=plan_id,
+                mode="graph_rag_enrich",
+                root_node_id=None,
+                processed_nodes=[],
+                created_tasks=[],
+                failed_nodes=[],
+                stopped_reason="empty_plan",
+                stats={
+                    "node_budget": budget_limit,
+                    "consumed_budget": 0,
+                    "queue_remaining": 0,
+                    "llm_calls": 0,
+                    "enriched_nodes": 0,
+                    "graph_rag_calls": 0,
+                },
+            )
+
+        graph_query = self._build_plan_graph_rag_query(tree)
+        logger.info(
+            "Running plan-level GraphRAG once for plan %s (mode=%s, query=%s)",
+            plan_id,
+            graph_rag_mode,
+            graph_query,
+        )
+        graph_payload: Optional[Dict[str, Any]]
+        try:
+            graph_payload = run_async(
+                execute_tool(
+                    "graph_rag",
+                    query=graph_query,
+                    mode=graph_rag_mode,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Plan-level GraphRAG failed for plan %s: %s", plan_id, exc)
+            graph_payload = {
+                "success": False,
+                "error": str(exc),
+                "code": "unexpected_error",
+            }
+
+        if not isinstance(graph_payload, dict) or not graph_payload.get("success"):
+            error = (
+                graph_payload.get("error")
+                if isinstance(graph_payload, dict)
+                else "graph_rag returned an invalid payload"
+            )
+            return DecompositionResult(
+                plan_id=plan_id,
+                mode="graph_rag_enrich",
+                root_node_id=root_reference,
+                processed_nodes=[],
+                created_tasks=[],
+                failed_nodes=[],
+                stopped_reason="graph_rag_failed",
+                stats={
+                    "node_budget": budget_limit,
+                    "consumed_budget": 0,
+                    "queue_remaining": len(queue),
+                    "llm_calls": 0,
+                    "enriched_nodes": 0,
+                    "graph_rag_calls": 1,
+                    "graph_rag_query": graph_query,
+                    "graph_rag_mode": graph_rag_mode,
+                    "graph_rag_error": error or "",
+                },
+            )
+
+        shared_graph_context, graph_meta = self._format_graph_rag_context(
+            graph_payload,
+            query=graph_query,
+        )
+        if not shared_graph_context:
+            return DecompositionResult(
+                plan_id=plan_id,
+                mode="graph_rag_enrich",
+                root_node_id=root_reference,
+                processed_nodes=[],
+                created_tasks=[],
+                failed_nodes=[],
+                stopped_reason="graph_rag_empty",
+                stats={
+                    "node_budget": budget_limit,
+                    "consumed_budget": 0,
+                    "queue_remaining": len(queue),
+                    "llm_calls": 0,
+                    "enriched_nodes": 0,
+                    "graph_rag_calls": 1,
+                    "graph_rag_query": graph_query,
+                    "graph_rag_mode": graph_rag_mode,
+                },
+            )
+
+        processed: List[Optional[int]] = []
+        failed: List[Optional[int]] = []
+        llm_calls = 0
+        enriched_nodes = 0
+        budget_remaining = max(budget_limit, 0)
+        outline_cache = tree.to_outline(max_depth=5, max_nodes=80)
+        total_targets = self._count_enrich_targets(tree, queue, depth_limit)
+        processed_count = 0
+        stopped_reason: Optional[str] = None
+
+        while queue and budget_remaining > 0:
+            current = queue.popleft()
+            if current.relative_depth > depth_limit:
+                continue
+            node = tree.nodes.get(current.node_id) if current.node_id else None
+            if node is None:
+                continue
+
+            processed_count += 1
+            logger.info(
+                "GraphRAG enrich node %s/%s (plan=%s, id=%s, name=%s)",
+                processed_count,
+                total_targets or "?",
+                plan_id,
+                node.id,
+                node.display_name(),
+            )
+
+            parent_web_context = self._collect_parent_web_context(tree, node)
+            current_web_context = self._collect_node_web_context(node)
+            enrich_prompt = self._build_node_enrichment_prompt(
+                plan=tree,
+                node=node,
+                outline=outline_cache,
+                parent_web_context=parent_web_context,
+                current_web_context=current_web_context,
+                new_web_context=None,
+                search_query=None,
+                provider=None,
+                results_count=None,
+                shared_graph_rag_context=shared_graph_context,
+                graph_rag_query=graph_meta.get("query"),
+                graph_rag_mode=graph_meta.get("mode"),
+                graph_rag_backend=graph_meta.get("backend"),
+            )
+
+            try:
+                raw_update = self._llm.enrich_node(enrich_prompt)
+                update_payload = self._parse_node_update(raw_update)
+                updated = self._apply_node_update(
+                    plan_id=plan_id,
+                    node=node,
+                    tree=tree,
+                    update=update_payload,
+                    web_context=None,
+                    query=None,
+                    provider=None,
+                    results_count=None,
+                    graph_rag_context=shared_graph_context,
+                    graph_rag_meta=graph_meta,
+                )
+                if updated:
+                    enriched_nodes += 1
+                    outline_cache = tree.to_outline(max_depth=5, max_nodes=80)
+                llm_calls += 1
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Shared GraphRAG node enrichment failed for node %s: %s",
+                    node.id,
+                    exc,
+                )
+                failed.append(node.id)
+                fallback = self._apply_node_update(
+                    plan_id=plan_id,
+                    node=node,
+                    tree=tree,
+                    update={},
+                    web_context=None,
+                    query=None,
+                    provider=None,
+                    results_count=None,
+                    graph_rag_context=shared_graph_context,
+                    graph_rag_meta=graph_meta,
+                )
+                if fallback:
+                    enriched_nodes += 1
+                    outline_cache = tree.to_outline(max_depth=5, max_nodes=80)
+
+            processed.append(node.id)
+            budget_remaining -= 1
+            if current.relative_depth < depth_limit:
+                for child_id in tree.children_ids(node.id):
+                    if budget_remaining <= 0:
+                        break
+                    queue.append(
+                        QueueItem(
+                            node_id=child_id,
+                            relative_depth=current.relative_depth + 1,
+                        )
+                    )
+
+        if budget_remaining <= 0:
+            stopped_reason = "node_budget_exhausted"
+
+        return DecompositionResult(
+            plan_id=plan_id,
+            mode="graph_rag_enrich",
+            root_node_id=root_reference,
+            processed_nodes=processed,
+            created_tasks=[],
+            failed_nodes=failed,
+            stopped_reason=stopped_reason,
+            stats={
+                "node_budget": budget_limit,
+                "consumed_budget": budget_limit - budget_remaining,
+                "queue_remaining": len(queue),
+                "llm_calls": llm_calls,
+                "enriched_nodes": enriched_nodes,
+                "graph_rag_calls": 1,
+                "graph_rag_query": graph_query,
+                "graph_rag_mode": graph_meta.get("mode") or graph_rag_mode,
+                "graph_rag_backend": graph_meta.get("backend") or "",
+            },
+        )
 
     def _count_enrich_targets(
         self, tree: PlanTree, queue: Deque[QueueItem], max_depth: int

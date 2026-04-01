@@ -17,10 +17,7 @@ ACTION_SCHEMAS: Dict[Tuple[str, str], Schema] = {
     ("tool_operation", "graph_rag"): {
         "required": {"query": str},
         "optional": {
-            "top_k": int,
-            "hops": int,
-            "return_subgraph": bool,
-            "focus_entities": str,
+            "mode": str,
         },
     },
     ("tool_operation", "springer_nature"): {

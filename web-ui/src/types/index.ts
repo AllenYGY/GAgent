@@ -291,6 +291,14 @@ export interface ToolResultPayload {
     query?: string;
     response?: string;
     answer?: string;
+    backend?: string;
+    mode?: string;
+    trace?: {
+      final_path?: string;
+      graphrag?: string;
+      vectorrag?: string;
+      [key: string]: any;
+    } | null;
     results?: ToolResultItem[] | null;
     records_preview?: Record<string, any>[] | null;
     record_count?: number;
@@ -554,6 +562,17 @@ export interface ChatStatusResponse {
     serial: boolean;
     use_context: boolean;
     max_tasks?: number | null;
+  };
+  graph_rag: {
+    configured?: boolean;
+    base_url?: string | null;
+    has_api_key?: boolean;
+    success?: boolean;
+    status_code?: number;
+    backend?: string | null;
+    error?: string | null;
+    code?: string | null;
+    [key: string]: any;
   };
   features: Record<string, any>;
   warnings: string[];

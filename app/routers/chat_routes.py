@@ -58,6 +58,10 @@ from app.services.plans.plan_models import PlanTree
 from app.services.plans.plan_session import PlanSession
 from app.services.session_title_service import SessionNotFoundError, SessionTitleService
 from tool_box import execute_tool
+from tool_box.tools_impl.graph_rag.service import (
+    ALLOWED_GRAPH_RAG_MODES,
+    check_graph_rag_health,
+)
 
 from . import register_router
 
@@ -236,6 +240,7 @@ class ChatStatusResponse(BaseModel):
     llm: Dict[str, Any]
     decomposer: Dict[str, Any]
     executor: Dict[str, Any]
+    graph_rag: Dict[str, Any]
     features: Dict[str, Any]
     warnings: List[str] = Field(default_factory=list)
 
@@ -621,10 +626,31 @@ async def chat_status() -> ChatStatusResponse:
         "max_tasks": executor_settings.max_tasks,
     }
 
+    graph_rag_settings = get_graph_rag_settings()
+    graph_rag_info = {
+        "configured": bool(
+            graph_rag_settings.base_url and graph_rag_settings.api_key
+        ),
+        "base_url": graph_rag_settings.base_url or None,
+        "has_api_key": bool(graph_rag_settings.api_key),
+    }
+    try:
+        graph_health = await check_graph_rag_health(graph_rag_settings)
+        graph_rag_info.update(graph_health)
+        if not graph_health.get("configured"):
+            error = graph_health.get("error") or "Graph RAG is not configured"
+            warnings.append(f"Graph RAG unavailable: {error}")
+        elif not graph_health.get("success"):
+            error = graph_health.get("error") or "Graph RAG backend unavailable"
+            warnings.append(f"Graph RAG degraded: {error}")
+    except Exception as exc:  # pragma: no cover - defensive
+        warnings.append(f"Graph RAG health check failed: {exc}")
+
     features = {
         "auto_decompose": bool(decomposer_settings.auto_on_create),
         "plan_executor": bool(executor_settings.model or executor_settings.provider),
         "structured_actions": True,
+        "graph_rag": graph_rag_info.get("configured", False),
     }
 
     status_value = "ready" if not warnings else "degraded"
@@ -634,6 +660,7 @@ async def chat_status() -> ChatStatusResponse:
         llm=llm_payload,
         decomposer=decomposer_info,
         executor=executor_info,
+        graph_rag=graph_rag_info,
         features=features,
         warnings=warnings,
     )
@@ -2314,6 +2341,7 @@ class StructuredChatAgent:
             "Preserve any user-provided identifiers, citations, alert numbers, or source names exactly in both text and action parameters; do not substitute or paraphrase them.",
             "For `task_operation/create_task`, always include `name` (required) and, when relevant, `instruction` and `parent_id`; never emit this action without a `name`.",
             "If the user supplies parameters for a create/update request, carry them fully into the action (no dropping or changing critical details). You may add required fields the user omitted.",
+            "When the user provides `instruction` text (or constraints/metrics to include), copy it verbatim into the action parameters; do not paraphrase, shorten, or omit details.",
             "A `request_subgraph` reply may contain only that action.",
             "Plan nodes do not provide a `priority` field; avoid fabricating it. `status` reflects progress and may be referenced when helpful.",
             "When the user explicitly asks to execute, run, or rerun a task or the plan, include the matching action or explain why it cannot proceed.",
@@ -2615,49 +2643,21 @@ class StructuredChatAgent:
                     details={"error": "missing_query", "tool": tool_name},
                 )
 
-            rag_settings = get_graph_rag_settings()
-
-            def _safe_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-                try:
-                    parsed = int(value)
-                except (TypeError, ValueError):
-                    parsed = default
-                return max(minimum, min(parsed, maximum))
-
-            default_top_k = min(12, rag_settings.max_top_k)
-            default_hops = min(1, rag_settings.max_hops)
-
-            top_k = _safe_int(
-                params.get("top_k"),
-                default=default_top_k,
-                minimum=1,
-                maximum=rag_settings.max_top_k,
-            )
-            hops = _safe_int(
-                params.get("hops"),
-                default=default_hops,
-                minimum=0,
-                maximum=rag_settings.max_hops,
-            )
-            return_subgraph = params.get("return_subgraph")
-            if return_subgraph is None:
-                return_subgraph = True
-            else:
-                return_subgraph = bool(return_subgraph)
-
-            focus_raw = params.get("focus_entities")
-            focus_entities: List[str] = []
-            if isinstance(focus_raw, list):
-                for item in focus_raw:
-                    if isinstance(item, str) and item.strip():
-                        focus_entities.append(item.strip())
-
+            mode = str(params.get("mode") or "hybrid").strip().lower()
+            if mode not in ALLOWED_GRAPH_RAG_MODES:
+                return AgentStep(
+                    action=action,
+                    success=False,
+                    message=f"graph_rag mode must be one of: {', '.join(ALLOWED_GRAPH_RAG_MODES)}.",
+                    details={
+                        "error": "invalid_mode",
+                        "tool": tool_name,
+                        "mode": mode,
+                    },
+                )
             params = {
                 "query": query.strip(),
-                "top_k": top_k,
-                "hops": hops,
-                "return_subgraph": return_subgraph,
-                "focus_entities": focus_entities,
+                "mode": mode,
             }
 
         elif tool_name == "springer_nature":
@@ -3148,6 +3148,14 @@ class StructuredChatAgent:
                     sanitized["record_count"] = len(records)
             result_block = raw_result.get("result")
             if isinstance(result_block, dict):
+                if "response" in result_block and isinstance(result_block["response"], str):
+                    sanitized["response"] = result_block["response"]
+                if "backend" in result_block and isinstance(result_block["backend"], str):
+                    sanitized["backend"] = result_block["backend"]
+                if "mode" in result_block and isinstance(result_block["mode"], str):
+                    sanitized["mode"] = result_block["mode"]
+                if "trace" in result_block and isinstance(result_block["trace"], dict):
+                    sanitized["trace"] = result_block["trace"]
                 if "prompt" in result_block and isinstance(result_block["prompt"], str):
                     sanitized["prompt"] = result_block["prompt"]
                 triples = result_block.get("triples")
@@ -3170,8 +3178,9 @@ class StructuredChatAgent:
                 if not sanitized.get("success"):
                     sanitized["empty_result"] = False
                 else:
+                    response = sanitized.get("response")
                     triples = sanitized.get("triples")
-                    sanitized["empty_result"] = not bool(triples)
+                    sanitized["empty_result"] = not bool(response or triples)
             return sanitized
 
         if raw_result is None:
@@ -3228,6 +3237,21 @@ class StructuredChatAgent:
             if result.get("success") is False:
                 error = result.get("error") or "Execution failed"
                 return f"{prefix} failed: {error}"
+            backend = result.get("backend") or "multirag"
+            mode = result.get("mode") or "hybrid"
+            trace = result.get("trace")
+            if isinstance(trace, dict):
+                final_path = trace.get("final_path")
+                if isinstance(final_path, str) and final_path:
+                    return (
+                        f"{prefix} finished via {backend} ({mode}), final path {final_path}."
+                    )
+            response = result.get("response")
+            if isinstance(response, str) and response.strip():
+                snippet = response.strip()
+                if len(snippet) > 120:
+                    snippet = snippet[:117] + "..."
+                return f"{prefix} finished. Summary: {snippet}"
             triples = result.get("triples") or []
             count = len(triples) if isinstance(triples, list) else 0
             if count:

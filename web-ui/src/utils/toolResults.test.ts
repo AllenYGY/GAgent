@@ -103,4 +103,30 @@ describe('toolResults utilities', () => {
     expect(payloads[0].result?.records_preview).toHaveLength(2);
     expect(payloads[0].result?.fallback_reason).toBe('basic_plan_simplified,field_constraints_removed');
   });
+
+  it('preserves graph_rag multirag fields', () => {
+    const payloads = collectToolResultsFromMetadata([
+      {
+        name: 'graph_rag',
+        summary: 'Knowledge-graph search finished',
+        result: {
+          query: 'batch effect',
+          success: true,
+          backend: 'multirag',
+          mode: 'hybrid',
+          response: '回答：这是最终融合结果。',
+          trace: {
+            final_path: 'merged',
+            graphrag: 'fallback_graph',
+            vectorrag: 'used',
+          },
+        },
+      },
+    ]);
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0].result?.backend).toBe('multirag');
+    expect(payloads[0].result?.mode).toBe('hybrid');
+    expect(payloads[0].result?.trace?.final_path).toBe('merged');
+  });
 });

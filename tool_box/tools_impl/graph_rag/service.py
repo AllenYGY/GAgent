@@ -1,158 +1,216 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import os
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional
+
+import httpx
 
 from app.config import GraphRAGSettings
 
 from .exceptions import GraphRAGError
-from .graph_rag import GraphRAG
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_GRAPH_RAG_MODES = ("hybrid", "local", "global", "naive")
+
 
 @dataclass(slots=True)
-class _ServiceState:
-    rag: GraphRAG
-    triples_path: str
+class _HealthState:
+    payload: Dict[str, Any]
+    timestamp: float
 
 
-_SERVICE_STATE: Optional[_ServiceState] = None
-_SERVICE_LOCK = asyncio.Lock()
+_HEALTH_STATE: Optional[_HealthState] = None
+_HEALTH_LOCK = asyncio.Lock()
 
 
-def _validate_triples_path(path: str) -> None:
-    if not os.path.exists(path):
+def _normalize_base_url(base_url: str) -> str:
+    return base_url.rstrip("/")
+
+
+def _validate_settings(settings: GraphRAGSettings) -> None:
+    if not settings.base_url or not settings.api_key:
         raise GraphRAGError(
-            f"知识图谱文件不存在: {path}",
-            code="missing_triples",
+            "Missing MultiRAG configuration: set MULTIRAG_BASE_URL and MULTIRAG_API_KEY.",
+            code="missing_config",
         )
-    if not os.path.isfile(path):
+
+
+def _health_cache_valid(settings: GraphRAGSettings) -> bool:
+    if _HEALTH_STATE is None:
+        return False
+    return (time.time() - _HEALTH_STATE.timestamp) <= settings.health_cache_ttl
+
+
+def _map_query_status(status_code: int, message: str) -> GraphRAGError:
+    if status_code == 401:
+        return GraphRAGError(message, code="invalid_api_key")
+    if status_code == 413:
+        return GraphRAGError(message, code="request_too_large")
+    if status_code == 429:
+        return GraphRAGError(message, code="rate_limit")
+    if status_code >= 500:
+        return GraphRAGError(message, code="service_unavailable")
+    return GraphRAGError(message, code="request_error")
+
+
+def _extract_error_text(response: httpx.Response, payload: Any) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+    text = response.text.strip()
+    if text:
+        return text
+    return f"HTTP {response.status_code}"
+
+
+async def _parse_json_response(response: httpx.Response) -> Any:
+    content = response.content
+    if not content:
+        return {}
+    try:
+        return response.json()
+    except json.JSONDecodeError as exc:
         raise GraphRAGError(
-            f"指定的 triples 路径不是文件: {path}",
-            code="invalid_triples_path",
-        )
+            f"Invalid MultiRAG JSON response: {exc}",
+            code="request_error",
+        ) from exc
 
 
-async def get_graph_rag_service(settings: GraphRAGSettings) -> GraphRAG:
-    """
-    获取 GraphRAG 实例（单例）。
+async def check_graph_rag_health(
+    settings: GraphRAGSettings,
+    *,
+    force: bool = False,
+) -> Dict[str, Any]:
+    global _HEALTH_STATE
 
-    每当配置中的 triples_path 发生变化时自动重新加载。
-    """
-    global _SERVICE_STATE
-
-    async with _SERVICE_LOCK:
-        if _SERVICE_STATE is not None:
-            try:
-                if os.path.samefile(
-                    _SERVICE_STATE.triples_path, settings.triples_path
-                ):
-                    return _SERVICE_STATE.rag
-            except FileNotFoundError:
-                # 如果新的路径不存在，后面会在 _validate_triples_path 中报错
-                pass
-
-        _validate_triples_path(settings.triples_path)
-        logger.info("加载 GraphRAG triples: %s", settings.triples_path)
-
-        try:
-            rag = GraphRAG(settings.triples_path)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("初始化 GraphRAG 失败: %s", exc)
-            raise GraphRAGError(
-                f"加载知识图谱失败: {exc}",
-                code="initialisation_failed",
-            ) from exc
-
-        _SERVICE_STATE = _ServiceState(rag=rag, triples_path=settings.triples_path)
-        return rag
-
-
-def _prioritise_triples(
-    triples: List[Dict[str, Any]],
-    focus_entities: Optional[Sequence[str]],
-) -> List[Dict[str, Any]]:
-    if not triples:
-        return triples
-    if not focus_entities:
-        return triples
-
-    focus_tokens = {
-        str(entity).strip().lower()
-        for entity in focus_entities
-        if isinstance(entity, str) and entity.strip()
+    configured = bool(settings.base_url and settings.api_key)
+    base_payload: Dict[str, Any] = {
+        "configured": configured,
+        "base_url": settings.base_url,
+        "has_api_key": bool(settings.api_key),
+        "success": False,
     }
-    if not focus_tokens:
-        return triples
 
-    def _score(triple: Dict[str, Any]) -> int:
-        score = 0
-        for key in ("entity1", "entity2"):
-            value = str(triple.get(key) or "").strip().lower()
-            if not value:
-                continue
-            if value in focus_tokens:
-                score += 2
-            elif any(token in value for token in focus_tokens):
-                score += 1
-        return -score  # sort ascending but using negative to prioritise higher score
+    if not settings.base_url:
+        return {
+            **base_payload,
+            "error": "Missing MULTIRAG_BASE_URL",
+            "code": "missing_config",
+        }
 
-    return sorted(triples, key=_score)
+    async with _HEALTH_LOCK:
+        if not force and _health_cache_valid(settings):
+            return dict(_HEALTH_STATE.payload)  # type: ignore[union-attr]
 
+        url = f"{_normalize_base_url(settings.base_url)}/api/health"
+        try:
+            async with httpx.AsyncClient(timeout=settings.health_timeout_seconds) as client:
+                response = await client.get(url)
+            payload = await _parse_json_response(response)
+            success = response.status_code == 200 and isinstance(payload, dict)
+            result = {
+                **base_payload,
+                "success": success,
+                "status_code": response.status_code,
+            }
+            if isinstance(payload, dict):
+                result.update(payload)
+            if not success and "error" not in result:
+                result["error"] = _extract_error_text(response, payload)
+                result["code"] = "service_unavailable"
+        except httpx.TimeoutException:
+            result = {
+                **base_payload,
+                "error": "MultiRAG health check timed out.",
+                "code": "query_timeout",
+            }
+        except httpx.HTTPError as exc:
+            result = {
+                **base_payload,
+                "error": f"MultiRAG health check failed: {exc}",
+                "code": "service_unavailable",
+            }
+        except GraphRAGError as exc:
+            result = {
+                **base_payload,
+                "error": exc.message,
+                "code": exc.code,
+            }
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("MultiRAG health check failed unexpectedly: %s", exc)
+            result = {
+                **base_payload,
+                "error": str(exc),
+                "code": "unexpected_error",
+            }
 
-def _clamp(value: int, minimum: int, maximum: int) -> int:
-    return max(minimum, min(value, maximum))
+        _HEALTH_STATE = _HealthState(payload=result, timestamp=time.time())
+        return dict(result)
 
 
 async def query_graph_rag(
     *,
-    rag: GraphRAG,
+    settings: GraphRAGSettings,
     query: str,
-    top_k: int,
-    hops: int,
-    return_subgraph: bool,
-    focus_entities: Optional[Sequence[str]],
+    mode: str,
 ) -> Dict[str, Any]:
-    try:
-        result = rag.query(
-            query,
-            top_k=top_k,
-            hops=hops,
-            return_subgraph=return_subgraph,
-        )
-    except Exception as exc:
-        logger.exception("GraphRAG 查询失败: %s", exc)
-        raise GraphRAGError(str(exc), code="query_failed") from exc
+    _validate_settings(settings)
 
-    triples = _prioritise_triples(result.get("triples") or [], focus_entities)
-
-    payload: Dict[str, Any] = {
+    url = f"{_normalize_base_url(settings.base_url)}/api/query"
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": settings.api_key,
+    }
+    payload = {
         "query": query,
-        "triples": triples,
-        "prompt": result.get("prompt"),
-        "metadata": {
-            "top_k": top_k,
-            "hops": hops,
-            "triple_count": len(triples),
-            "has_subgraph": bool(result.get("subgraph")),
-            "focus_entities": [
-                entity for entity in (focus_entities or []) if isinstance(entity, str)
-            ],
-        },
+        "mode": mode,
     }
 
-    if return_subgraph and "subgraph" in result:
-        payload["subgraph"] = result["subgraph"]
+    try:
+        async with httpx.AsyncClient(timeout=settings.query_timeout_seconds) as client:
+            response = await client.post(url, json=payload, headers=headers)
+        data = await _parse_json_response(response)
+    except httpx.TimeoutException as exc:
+        raise GraphRAGError(
+            "MultiRAG query timed out.",
+            code="query_timeout",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise GraphRAGError(
+            f"MultiRAG request failed: {exc}",
+            code="service_unavailable",
+        ) from exc
 
-    return payload
+    if response.status_code >= 400:
+        message = _extract_error_text(response, data)
+        raise _map_query_status(response.status_code, message)
+
+    if not isinstance(data, dict):
+        raise GraphRAGError(
+            "Invalid MultiRAG response payload.",
+            code="request_error",
+        )
+
+    success = data.get("success")
+    if success is False:
+        error = data.get("error")
+        message = error if isinstance(error, str) and error.strip() else "MultiRAG query failed."
+        raise GraphRAGError(message, code="request_error")
+
+    return {
+        "backend": str(data.get("backend") or "multirag"),
+        "mode": str(data.get("mode") or mode),
+        "response": data.get("result") if isinstance(data.get("result"), str) else "",
+        "trace": data.get("trace") if isinstance(data.get("trace"), dict) else {},
+    }
 
 
 def reset_graph_rag_service() -> None:
-    """测试场景下重置 GraphRAG 单例。"""
-
-    global _SERVICE_STATE
-    _SERVICE_STATE = None
+    global _HEALTH_STATE
+    _HEALTH_STATE = None

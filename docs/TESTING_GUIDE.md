@@ -45,7 +45,7 @@ test/
 - `test/test_task_contexts.py`：上下文更新与 context_updated_at 字段写入验证。
 - `test/simulation/test_orchestrator.py`：仿真 orchestrator 单轮执行、plan outline 快照、消息持久化。
 - `test/simulation/test_runtime.py`：SimulationRegistry 状态流转、自动终止、JSON 持久化时间戳。
-- `test/tools/test_graph_rag_tool.py`：graph_rag 工具读取 triples、focus_entities 过滤、缺失文件错误。
+- `test/tools/test_graph_rag_tool.py`：graph_rag 工具的 MultiRAG HTTP 调用、mode 校验、健康检查、错误码映射与缓存行为。
 
 ## 3) 运行方式
 

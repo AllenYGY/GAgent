@@ -54,8 +54,13 @@ QWEN_MODEL=qwen-turbo
 DEFAULT_WEB_SEARCH_PROVIDER=builtin
 BUILTIN_SEARCH_PROVIDER=qwen
 
-# Graph RAG 配置（如需自定义路径）
-GRAPH_RAG_TRIPLES_PATH=/opt/GAgent/tool_box/tools_impl/graph_rag/Triples/all_triples.csv
+# Graph RAG / MultiRAG 配置
+MULTIRAG_BASE_URL=http://your-multirag-host:8002
+MULTIRAG_API_KEY=...
+MULTIRAG_QUERY_TIMEOUT_SECONDS=420
+MULTIRAG_HEALTH_TIMEOUT_SECONDS=5
+MULTIRAG_HEALTH_CACHE_TTL=60
+GRAPH_RAG_CACHE_TTL=900
 
 # 其他可选项
 PLAN_EXECUTOR_MODEL=...
@@ -110,7 +115,7 @@ sudo systemctl status gagent
 
 如需多 worker，可将 `ExecStart` 改用 `gunicorn`：
 ```ini
-ExecStart=/opt/GAgent/venv/bin/gunicorn app.main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9000 --workers 4 --timeout 120
+ExecStart=/opt/GAgent/venv/bin/gunicorn app.main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9000 --workers 4 --timeout 600
 ```
 
 ## 5. 配置 Nginx（前端 + 反向代理）
@@ -175,7 +180,7 @@ sudo certbot --nginx -d your-frontend-domain.com
 ## 6. 数据与权限
 
 - 确保 `/opt/GAgent/data/`、`example/data/` 等写入目录对运行用户（例如 `www-data`）可写。
-- Graph RAG CSV 放在 `GRAPH_RAG_TRIPLES_PATH` 指定位置并授予读取权限。
+- 确保外部 MultiRAG 服务可访问，且 `MULTIRAG_BASE_URL` / `MULTIRAG_API_KEY` 配置正确。
 - 如需 SQLite 备份，可定期复制 `/opt/GAgent/data/databases` 目录。
 
 ## 7. 验证
@@ -190,7 +195,7 @@ sudo certbot --nginx -d your-frontend-domain.com
 - **CORS 报错**：确认 `.env` 中 `CORS_ORIGINS` 包含前端域名，并重启后端。
 - **前端 API 404**：检查 Nginx 反向代理路径是否与 FastAPI 路由前缀一致（默认 `/chat`, `/plans`, `/tasks`）。
 - **工具调用失败**：确认 `.env` 中必需的 API Key（如 `QWEN_API_KEY`, `PERPLEXITY_API_KEY`）已配置。
-- **Graph RAG 无结果**：检查 CSV 路径是否可被后端读取，若放置自定义位置别忘了修改 `GRAPH_RAG_TRIPLES_PATH`。
+- **Graph RAG 无结果**：检查 MultiRAG 服务是否可访问，确认 `MULTIRAG_BASE_URL`、`MULTIRAG_API_KEY` 和超时配置正确；必要时先调用 MultiRAG 的 `/api/health` 检查状态。
 
 ## 9. 升级 / 回滚
 

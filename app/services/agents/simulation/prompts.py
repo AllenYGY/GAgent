@@ -89,7 +89,8 @@ Respond with a JSON object containing:
 }}
 
 In `user_message`, restate the same parameters/constraints you put in `desired_action.parameters` so the assistant can follow them precisely.
-The JSON must be the entire response with no extra commentary. Your desired_action must be executable against the ACTION catalog/schema (no invented fields, use the exact parameter names the action expects).
+The JSON must be the entire response with no extra commentary. Do NOT include code fences, markdown, or trailing text.
+Return exactly one JSON object. Your desired_action must be executable against the ACTION catalog/schema (no invented fields, use the exact parameter names the action expects).
 """.strip()
 
 
@@ -106,24 +107,17 @@ def build_judge_prompt(
     chat_actions_text = _format_chat_actions(chat_agent_turn.actions)
 
     return f"""
-You are the judge overseeing whether the assistant's ACTIONS match the simulated user's intent.
+You are the judge. Compare ONLY the simulated user's desired ACTION to the assistant's ACTIONS.
+- Do NOT infer whether the action is needed from the plan outline.
+- Do NOT judge plan quality. Ignore feasibility and scope.
 
-Plan outline:
-{plan_outline}
-
-Improvement goal:
-{goal_text}
-
-Simulated user's desired ACTION:
+Simulated user's desired ACTION (ground truth):
 {sim_action_text}
 
-Assistant reply:
-{chat_agent_turn.reply}
-
-Assistant ACTIONS:
+Assistant ACTIONS (what to compare against):
 {chat_actions_text}
 
-Return a JSON object:
+Return a JSON object ONLY (no code fences, no extra text):
 {{
     "alignment_score": 0 | 1,
     "reason": "<brief explanation identifying the mismatch>",
@@ -131,5 +125,5 @@ Return a JSON object:
 }}
 
 Use score 0 for aligned behavior and 1 when the assistant is misaligned.
-Respond with JSON only.
+If unsure, still return valid JSON with alignment_score=1 and a brief reason.
 """.strip()

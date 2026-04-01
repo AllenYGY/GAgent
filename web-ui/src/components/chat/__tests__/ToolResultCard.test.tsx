@@ -69,4 +69,34 @@ describe('ToolResultCard', () => {
       expect(sendMessage).toHaveBeenCalledTimes(1);
     });
   });
+
+  it('renders graph_rag response and trace fields', () => {
+    render(
+      <ToolResultCard
+        defaultOpen
+        payload={{
+          name: 'graph_rag',
+          summary: 'Knowledge-graph search completed',
+          result: {
+            query: 'batch effect',
+            success: true,
+            backend: 'multirag',
+            mode: 'hybrid',
+            response: '回答：这是最终融合结果。',
+            trace: {
+              final_path: 'merged',
+              graphrag: 'fallback_graph',
+              vectorrag: 'used',
+            },
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('Knowledge-graph search completed')).toBeInTheDocument();
+    expect(screen.getByText('回答：这是最终融合结果。')).toBeInTheDocument();
+    expect(screen.getByText('Backend: multirag')).toBeInTheDocument();
+    expect(screen.getByText('Mode: hybrid')).toBeInTheDocument();
+    expect(screen.getByText('Final path: merged')).toBeInTheDocument();
+  });
 });

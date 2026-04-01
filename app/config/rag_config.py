@@ -1,7 +1,7 @@
 """
-Graph RAG 配置
+Graph RAG configuration.
 
-集中管理 Graph RAG 模块的路径、缓存参数等设置。
+The public tool name remains `graph_rag`, but the runtime backend is MultiRAG.
 """
 
 from __future__ import annotations
@@ -14,12 +14,14 @@ from typing import Optional
 
 @dataclass(slots=True)
 class GraphRAGSettings:
-    """Graph RAG 模块配置"""
+    """MultiRAG-backed Graph RAG configuration."""
 
-    triples_path: str
+    base_url: str = ""
+    api_key: str = ""
+    query_timeout_seconds: float = 420.0
+    health_timeout_seconds: float = 5.0
+    health_cache_ttl: int = 60
     cache_ttl: int = 900
-    max_top_k: int = 20
-    max_hops: int = 2
 
 
 def _env(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -30,49 +32,41 @@ def _env(key: str, default: Optional[str] = None) -> Optional[str]:
     return stripped or default
 
 
+def _float_env(key: str, default: float) -> float:
+    raw = _env(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _int_env(key: str, default: int) -> int:
+    raw = _env(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @lru_cache(maxsize=1)
 def get_graph_rag_settings() -> GraphRAGSettings:
-    """读取环境变量并返回 Graph RAG 设置"""
-
-    root_dir = os.getenv("GRAPH_RAG_ROOT_DIR")
-    default_path = os.path.join(
-        root_dir or os.path.dirname(__file__),
-        "..",
-        "..",
-        "tool_box",
-        "tools_impl",
-        "graph_rag",
-        "Triples",
-        "all_triples.csv",
-    )
-    default_path = os.path.abspath(default_path)
-
-    triples_path = _env("GRAPH_RAG_TRIPLES_PATH", default_path) or default_path
-
-    try:
-        cache_ttl = int(_env("GRAPH_RAG_CACHE_TTL", "900") or "900")
-    except ValueError:
-        cache_ttl = 900
-
-    try:
-        max_top_k = int(_env("GRAPH_RAG_MAX_TOP_K", "20") or "20")
-    except ValueError:
-        max_top_k = 20
-
-    try:
-        max_hops = int(_env("GRAPH_RAG_MAX_HOPS", "2") or "2")
-    except ValueError:
-        max_hops = 2
+    """Read environment variables and return MultiRAG settings."""
 
     return GraphRAGSettings(
-        triples_path=triples_path,
-        cache_ttl=max(cache_ttl, 0),
-        max_top_k=max(max_top_k, 1),
-        max_hops=max(max_hops, 0),
+        base_url=_env("MULTIRAG_BASE_URL", "") or "",
+        api_key=_env("MULTIRAG_API_KEY", "") or "",
+        query_timeout_seconds=max(_float_env("MULTIRAG_QUERY_TIMEOUT_SECONDS", 420.0), 1.0),
+        health_timeout_seconds=max(_float_env("MULTIRAG_HEALTH_TIMEOUT_SECONDS", 5.0), 1.0),
+        health_cache_ttl=max(_int_env("MULTIRAG_HEALTH_CACHE_TTL", 60), 0),
+        cache_ttl=max(_int_env("GRAPH_RAG_CACHE_TTL", 900), 0),
     )
 
 
 def reset_graph_rag_settings_cache() -> None:
-    """测试场景下重置缓存"""
+    """Clear cached Graph RAG settings (tests)."""
 
     get_graph_rag_settings.cache_clear()  # type: ignore[attr-defined]

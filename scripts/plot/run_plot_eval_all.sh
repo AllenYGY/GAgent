@@ -12,6 +12,8 @@ run_dirs=(
   "$ROOT/results/agent_plans_phage_qwen"
   "$ROOT/results/agent_plans_phage_deepseek_web_enriched_refactor_v2"
   "$ROOT/results/agent_plans_phage_qwen_web_enriched_refactor_v2"
+  "$ROOT/results/agent_plans_phage_deepseek_web_rag"
+  "$ROOT/results/agent_plans_phage_qwen_web_rag"
   "$ROOT/results/llm_plans_phage_gemini"
   "$ROOT/results/llm_plans_phage_grok"
   "$ROOT/results/llm_plans_phage_gpt52chat"
@@ -40,6 +42,11 @@ python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "gpt52chat_10pt" \
   --output-dir "$plots_root/score_radars_gpt52chat"
+
+python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+  --run-dirs "${run_dirs[@]}" \
+  --eval-tag "grok_10pt" \
+  --output-dir "$plots_root/score_radars_grok"
 
 shopt -s nullglob
 
@@ -82,5 +89,6 @@ plot_boxplots_all "qwen"
 plot_boxplots_all "deepseekv3"
 plot_boxplots_all "gemini"
 plot_boxplots_all "gpt52chat"
+plot_boxplots_all "grok"
 
 echo "[INFO] Plots output root: $plots_root"

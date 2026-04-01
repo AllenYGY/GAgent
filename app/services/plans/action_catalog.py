@@ -22,7 +22,10 @@ def build_action_catalog(
         )
     if allow_graph_rag:
         base_actions.append(
-            "- tool_operation: graph_rag (query the phage-host knowledge graph; requires `query`, optional top_k/hops/return_subgraph/focus_entities)"
+            "- tool_operation: graph_rag (query the MultiRAG knowledge backend; requires `query`, optional `mode`).\n"
+            "  mode can be `hybrid` (default, best general choice), `local` (entity-focused local context), "
+            "`global` (higher-level global summary), or `naive` (plain retrieval).\n"
+            "  Only send `query` and `mode`; do NOT generate `top_k`, `hops`, `return_subgraph`, or `focus_entities`."
         )
     if allow_springer_nature:
         base_actions.append(

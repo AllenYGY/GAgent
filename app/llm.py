@@ -85,6 +85,11 @@ PROVIDER_CONFIGS: Dict[str, Dict[str, Any]] = {
         "default_url": "https://api.x.ai/v1",
         "default_model": "grok-4",
         "endpoint_path": "/chat/completions",
+        # x.ai may reject default urllib requests without a User-Agent.
+        "headers": {
+            "User-Agent": "GAgent/1.0",
+            "Accept": "application/json",
+        },
     },
     "gemini": {
         "api_key_env": "GEMINI_API_KEY",
@@ -96,6 +101,29 @@ PROVIDER_CONFIGS: Dict[str, Dict[str, Any]] = {
         "default_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "default_model": "gemini-2.5-flash",
         "endpoint_path": "/chat/completions",
+    },
+    "custom_wxx": {
+        "api_key_env": ["CUSTOM_WXX_API_KEY", "OPENAI_COMPAT_API_KEY"],
+        "url_env": ["CUSTOM_WXX_API_URL", "OPENAI_COMPAT_API_URL"],
+        "model_env": ["CUSTOM_WXX_MODEL", "OPENAI_COMPAT_MODEL"],
+        "settings_api_key": "custom_wxx_api_key",
+        "settings_url": "custom_wxx_api_url",
+        "settings_model": "custom_wxx_model",
+        "default_url": "https://trial-units-sms-leeds.trycloudflare.com/v1",
+        "default_model": "gemini-3-flash",
+        "endpoint_path": "/v1/chat/completions",
+    },
+    # Backward compatibility alias (prefer `custom_wxx`)
+    "openai_compat": {
+        "api_key_env": ["CUSTOM_WXX_API_KEY", "OPENAI_COMPAT_API_KEY"],
+        "url_env": ["CUSTOM_WXX_API_URL", "OPENAI_COMPAT_API_URL"],
+        "model_env": ["CUSTOM_WXX_MODEL", "OPENAI_COMPAT_MODEL"],
+        "settings_api_key": "custom_wxx_api_key",
+        "settings_url": "custom_wxx_api_url",
+        "settings_model": "custom_wxx_model",
+        "default_url": "https://trial-units-sms-leeds.trycloudflare.com/v1",
+        "default_model": "gemini-3-flash",
+        "endpoint_path": "/v1/chat/completions",
     },
     "openrouter": {
         "api_key_env": "OPENROUTER_API_KEY",
@@ -138,6 +166,9 @@ def _compose_endpoint(base_url: str, path: Optional[str]) -> str:
         return base_url
     if path.startswith("http://") or path.startswith("https://"):
         return path
+    # Avoid duplicated /v1 segment when both base_url and path include it.
+    if base_url.rstrip("/").endswith("/v1") and path.startswith("/v1/"):
+        path = path[len("/v1") :]
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
@@ -231,8 +262,8 @@ class LLMClient(LLMProvider):
 
         if not self.api_key:
             raise RuntimeError(f"{self.provider.upper()}_API_KEY is not set in environment")
-        if self.provider == "openrouter":
-            # Use plain string content to match OpenRouter curl examples.
+        if self.provider in {"openrouter", "openai_compat", "custom_wxx"}:
+            # Use plain string content for OpenAI-compatible gateways.
             messages = [{"role": "user", "content": prompt}]
         else:
             # Use structured content blocks to satisfy providers that require `type: text`.
