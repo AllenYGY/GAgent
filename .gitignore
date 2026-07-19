@@ -19,3 +19,4 @@ bulk_plans.csv
 .ruff_cache/*
 api_client.log
 scripts/*
+logs/*
