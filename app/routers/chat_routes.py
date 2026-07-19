@@ -2643,7 +2643,7 @@ class StructuredChatAgent:
                     details={"error": "missing_query", "tool": tool_name},
                 )
 
-            mode = str(params.get("mode") or "hybrid").strip().lower()
+            mode = str(params.get("mode") or "mix").strip().lower()
             if mode not in ALLOWED_GRAPH_RAG_MODES:
                 return AgentStep(
                     action=action,
@@ -3237,8 +3237,8 @@ class StructuredChatAgent:
             if result.get("success") is False:
                 error = result.get("error") or "Execution failed"
                 return f"{prefix} failed: {error}"
-            backend = result.get("backend") or "multirag"
-            mode = result.get("mode") or "hybrid"
+            backend = result.get("backend") or "lightrag_8_shard"
+            mode = result.get("mode") or "mix"
             trace = result.get("trace")
             if isinstance(trace, dict):
                 final_path = trace.get("final_path")

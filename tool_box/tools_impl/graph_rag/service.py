@@ -15,7 +15,7 @@ from .exceptions import GraphRAGError
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_GRAPH_RAG_MODES = ("hybrid", "local", "global", "naive")
+ALLOWED_GRAPH_RAG_MODES = ("mix", "local", "global", "hybrid", "naive", "bypass")
 
 
 @dataclass(slots=True)
@@ -35,7 +35,7 @@ def _normalize_base_url(base_url: str) -> str:
 def _validate_settings(settings: GraphRAGSettings) -> None:
     if not settings.base_url or not settings.api_key:
         raise GraphRAGError(
-            "Missing MultiRAG configuration: set MULTIRAG_BASE_URL and MULTIRAG_API_KEY.",
+            "Missing LightRAG configuration: set MULTIRAG_BASE_URL and MULTIRAG_API_KEY.",
             code="missing_config",
         )
 
@@ -47,7 +47,7 @@ def _health_cache_valid(settings: GraphRAGSettings) -> bool:
 
 
 def _map_query_status(status_code: int, message: str) -> GraphRAGError:
-    if status_code == 401:
+    if status_code in {401, 403}:
         return GraphRAGError(message, code="invalid_api_key")
     if status_code == 413:
         return GraphRAGError(message, code="request_too_large")
@@ -63,6 +63,9 @@ def _extract_error_text(response: httpx.Response, payload: Any) -> str:
         error = payload.get("error")
         if isinstance(error, str) and error.strip():
             return error.strip()
+        detail = payload.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
     text = response.text.strip()
     if text:
         return text
@@ -77,7 +80,7 @@ async def _parse_json_response(response: httpx.Response) -> Any:
         return response.json()
     except json.JSONDecodeError as exc:
         raise GraphRAGError(
-            f"Invalid MultiRAG JSON response: {exc}",
+            f"Invalid LightRAG JSON response: {exc}",
             code="request_error",
         ) from exc
 
@@ -108,7 +111,7 @@ async def check_graph_rag_health(
         if not force and _health_cache_valid(settings):
             return dict(_HEALTH_STATE.payload)  # type: ignore[union-attr]
 
-        url = f"{_normalize_base_url(settings.base_url)}/api/health"
+        url = f"{_normalize_base_url(settings.base_url)}/health"
         try:
             async with httpx.AsyncClient(timeout=settings.health_timeout_seconds) as client:
                 response = await client.get(url)
@@ -127,13 +130,13 @@ async def check_graph_rag_health(
         except httpx.TimeoutException:
             result = {
                 **base_payload,
-                "error": "MultiRAG health check timed out.",
+                "error": "LightRAG health check timed out.",
                 "code": "query_timeout",
             }
         except httpx.HTTPError as exc:
             result = {
                 **base_payload,
-                "error": f"MultiRAG health check failed: {exc}",
+                "error": f"LightRAG health check failed: {exc}",
                 "code": "service_unavailable",
             }
         except GraphRAGError as exc:
@@ -143,7 +146,7 @@ async def check_graph_rag_health(
                 "code": exc.code,
             }
         except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("MultiRAG health check failed unexpectedly: %s", exc)
+            logger.exception("LightRAG health check failed unexpectedly: %s", exc)
             result = {
                 **base_payload,
                 "error": str(exc),
@@ -162,7 +165,7 @@ async def query_graph_rag(
 ) -> Dict[str, Any]:
     _validate_settings(settings)
 
-    url = f"{_normalize_base_url(settings.base_url)}/api/query"
+    url = f"{_normalize_base_url(settings.base_url)}/query"
     headers = {
         "Content-Type": "application/json",
         "X-API-Key": settings.api_key,
@@ -170,6 +173,9 @@ async def query_graph_rag(
     payload = {
         "query": query,
         "mode": mode,
+        "top_k": settings.top_k,
+        "max_chunks": settings.max_chunks,
+        "max_references": settings.max_references,
     }
 
     try:
@@ -178,12 +184,12 @@ async def query_graph_rag(
         data = await _parse_json_response(response)
     except httpx.TimeoutException as exc:
         raise GraphRAGError(
-            "MultiRAG query timed out.",
+            "LightRAG query timed out.",
             code="query_timeout",
         ) from exc
     except httpx.HTTPError as exc:
         raise GraphRAGError(
-            f"MultiRAG request failed: {exc}",
+            f"LightRAG request failed: {exc}",
             code="service_unavailable",
         ) from exc
 
@@ -193,21 +199,28 @@ async def query_graph_rag(
 
     if not isinstance(data, dict):
         raise GraphRAGError(
-            "Invalid MultiRAG response payload.",
+            "Invalid LightRAG response payload.",
             code="request_error",
         )
 
-    success = data.get("success")
-    if success is False:
-        error = data.get("error")
-        message = error if isinstance(error, str) and error.strip() else "MultiRAG query failed."
-        raise GraphRAGError(message, code="request_error")
+    response_text = data.get("response")
+    if not isinstance(response_text, str) or not response_text.strip():
+        raise GraphRAGError(
+            "LightRAG query returned an empty response.",
+            code="request_error",
+        )
+
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    references = data.get("references") if isinstance(data.get("references"), list) else []
 
     return {
-        "backend": str(data.get("backend") or "multirag"),
-        "mode": str(data.get("mode") or mode),
-        "response": data.get("result") if isinstance(data.get("result"), str) else "",
-        "trace": data.get("trace") if isinstance(data.get("trace"), dict) else {},
+        "backend": "lightrag_8_shard",
+        "mode": str(metadata.get("query_mode") or mode),
+        "response": response_text.strip(),
+        "trace": {
+            "references": references,
+            "metadata": metadata,
+        },
     }
 
 

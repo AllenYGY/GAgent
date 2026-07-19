@@ -4,9 +4,14 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict
 
 from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.config import get_graph_rag_settings, reset_graph_rag_settings_cache
 from tool_box.tools_impl.graph_rag import graph_rag_handler
@@ -15,7 +20,7 @@ from tool_box.tools_impl.graph_rag.service import check_graph_rag_health
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Smoke test the MultiRAG-backed graph_rag integration.",
+        description="Smoke test the 8-shard LightRAG-backed graph_rag integration.",
     )
     parser.add_argument(
         "--query",
@@ -24,14 +29,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        default="hybrid",
-        choices=["hybrid", "local", "global", "naive"],
-        help="MultiRAG mode.",
+        default="mix",
+        choices=["mix", "local", "global", "hybrid", "naive", "bypass"],
+        help="LightRAG mode.",
     )
     parser.add_argument(
         "--health-only",
         action="store_true",
-        help="Only call GET /api/health and skip the query request.",
+        help="Only call GET /health and skip the query request.",
     )
     parser.add_argument(
         "--force-health",

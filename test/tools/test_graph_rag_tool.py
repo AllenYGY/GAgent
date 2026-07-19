@@ -85,6 +85,9 @@ def _reset_graph_rag_env(monkeypatch):
     monkeypatch.delenv("MULTIRAG_HEALTH_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("MULTIRAG_HEALTH_CACHE_TTL", raising=False)
     monkeypatch.delenv("GRAPH_RAG_CACHE_TTL", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_TOP_K", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_MAX_CHUNKS", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_MAX_REFERENCES", raising=False)
     reset_graph_rag_settings_cache()
     reset_graph_rag_service()
     yield
@@ -147,33 +150,44 @@ async def test_graph_rag_handler_success_and_cache(monkeypatch, isolated_graph_c
         _FakeResponse(
             200,
             {
-                "success": True,
-                "backend": "multirag",
-                "mode": "hybrid",
-                "result": "回答：batch effect 的核心处理流程",
-                "trace": {
-                    "final_path": "merged",
-                    "graphrag": "fallback_graph",
-                    "vectorrag": "used",
+                "response": "回答：batch effect 的核心处理流程",
+                "references": [
+                    {
+                        "reference_id": "1",
+                        "file_path": "batch-effect.md",
+                        "shard": "03",
+                    }
+                ],
+                "metadata": {
+                    "shards_total": 8,
+                    "shards_ok": 8,
+                    "query_mode": "mix",
                 },
             },
         )
     ]
     _patch_async_client(monkeypatch, responses, calls)
 
-    first = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
-    second = await graph_module.graph_rag_handler(query="batch effect", mode="hybrid")
+    first = await graph_module.graph_rag_handler(query="batch effect")
+    second = await graph_module.graph_rag_handler(query="batch effect")
 
     assert first["success"] is True
-    assert first["result"]["backend"] == "multirag"
-    assert first["result"]["mode"] == "hybrid"
+    assert first["result"]["backend"] == "lightrag_8_shard"
+    assert first["result"]["mode"] == "mix"
     assert first["result"]["response"].startswith("回答")
-    assert first["result"]["trace"]["final_path"] == "merged"
+    assert first["result"]["trace"]["references"][0]["shard"] == "03"
+    assert first["result"]["trace"]["metadata"]["shards_ok"] == 8
     assert second["cache_hit"] is True
     assert len(calls) == 1
     assert calls[0]["method"] == "POST"
-    assert calls[0]["url"] == "http://multirag.local/api/query"
-    assert calls[0]["kwargs"]["json"] == {"query": "batch effect", "mode": "hybrid"}
+    assert calls[0]["url"] == "http://multirag.local/query"
+    assert calls[0]["kwargs"]["json"] == {
+        "query": "batch effect",
+        "mode": "mix",
+        "top_k": 2,
+        "max_chunks": 24,
+        "max_references": 32,
+    }
     assert calls[0]["kwargs"]["headers"]["X-API-Key"] == "server-key"
 
 
@@ -189,11 +203,9 @@ async def test_graph_rag_handler_does_not_cache_failures(monkeypatch, isolated_g
         _FakeResponse(
             200,
             {
-                "success": True,
-                "backend": "multirag",
-                "mode": "hybrid",
-                "result": "ok",
-                "trace": {"final_path": "vector_only"},
+                "response": "ok",
+                "references": [],
+                "metadata": {"query_mode": "hybrid"},
             },
         ),
     ]
@@ -214,6 +226,8 @@ async def test_graph_rag_handler_does_not_cache_failures(monkeypatch, isolated_g
     ("status_code", "payload", "expected_code"),
     [
         (401, {"success": False, "error": "bad key"}, "invalid_api_key"),
+        (403, {"detail": "Invalid API Key"}, "invalid_api_key"),
+        (422, {"detail": "invalid request"}, "request_error"),
         (413, {"success": False, "error": "too large"}, "request_too_large"),
         (429, {"success": False, "error": "slow down"}, "rate_limit"),
         (503, {"success": False, "error": "temporarily unavailable"}, "service_unavailable"),
@@ -265,9 +279,10 @@ async def test_check_graph_rag_health_uses_get_without_api_key(monkeypatch):
         _FakeResponse(
             200,
             {
-                "success": True,
-                "backend": "multirag",
-                "query_timeout_seconds": 300,
+                "status": "healthy",
+                "shards_total": 8,
+                "shards_ok": 8,
+                "shards": [],
             },
         )
     ]
@@ -275,10 +290,11 @@ async def test_check_graph_rag_health_uses_get_without_api_key(monkeypatch):
 
     health = await check_graph_rag_health(get_graph_rag_settings())
     assert health["success"] is True
-    assert health["backend"] == "multirag"
+    assert health["shards_total"] == 8
+    assert health["shards_ok"] == 8
     assert len(calls) == 1
     assert calls[0]["method"] == "GET"
-    assert calls[0]["url"] == "http://multirag.local/api/health"
+    assert calls[0]["url"] == "http://multirag.local/health"
     assert "headers" not in calls[0]["kwargs"]
 
 
@@ -291,7 +307,7 @@ async def test_check_graph_rag_health_is_cached(monkeypatch):
 
     calls: List[Dict[str, Any]] = []
     responses: List[Any] = [
-        _FakeResponse(200, {"success": True, "backend": "multirag"}),
+        _FakeResponse(200, {"status": "healthy", "shards_total": 8, "shards_ok": 8}),
     ]
     _patch_async_client(monkeypatch, responses, calls)
 

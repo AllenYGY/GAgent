@@ -789,7 +789,7 @@ class PlanDecomposer:
         *,
         max_depth: Optional[int] = None,
         node_budget: Optional[int] = None,
-        graph_rag_mode: str = "hybrid",
+        graph_rag_mode: str = "mix",
     ) -> DecompositionResult:
         tree = self._repo.get_plan_tree(plan_id)
         depth_limit = max_depth if max_depth is not None else self._settings.max_depth

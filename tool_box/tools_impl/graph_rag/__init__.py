@@ -1,5 +1,5 @@
 """
-Graph RAG tool backed by MultiRAG.
+Graph RAG tool backed by the 8-shard LightRAG gateway.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_mode(raw: Any) -> str:
-    mode = str(raw or "hybrid").strip().lower()
+    mode = str(raw or "mix").strip().lower()
     if mode not in ALLOWED_GRAPH_RAG_MODES:
         raise GraphRAGError(
             f"Unsupported graph_rag mode: {mode}",
@@ -29,7 +29,7 @@ def _normalize_mode(raw: Any) -> str:
 async def graph_rag_handler(
     *,
     query: str,
-    mode: str = "hybrid",
+    mode: str = "mix",
 ) -> Dict[str, Any]:
     query_text = (query or "").strip()
     if not query_text:
@@ -54,6 +54,9 @@ async def graph_rag_handler(
     params = {
         "query": query_text,
         "mode": normalized_mode,
+        "top_k": settings.top_k,
+        "max_chunks": settings.max_chunks,
+        "max_references": settings.max_references,
     }
 
     cache = await get_memory_cache()
@@ -95,26 +98,26 @@ async def graph_rag_handler(
 
 graph_rag_tool = {
     "name": "graph_rag",
-    "description": "Query the MultiRAG knowledge backend and return the final answer plus trace data.",
+    "description": "Query the 8-shard LightRAG backend and return the final answer plus trace data.",
     "category": "knowledge_graph",
     "parameters_schema": {
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "User query for MultiRAG.",
+                "description": "User query for LightRAG.",
             },
             "mode": {
                 "type": "string",
                 "enum": list(ALLOWED_GRAPH_RAG_MODES),
-                "default": "hybrid",
-                "description": "MultiRAG retrieval mode.",
+                "default": "mix",
+                "description": "LightRAG retrieval mode.",
             },
         },
         "required": ["query"],
     },
     "handler": graph_rag_handler,
-    "tags": ["knowledge", "graph", "rag", "multirag"],
+    "tags": ["knowledge", "graph", "rag", "lightrag"],
     "examples": [
         "噬菌体和水产养殖有什么关系",
         "what is BACTERIOPHAGE",

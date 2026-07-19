@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT="/Users/allenygy/Research/GAgent"
 plots_root="$ROOT/results/plots_eval_all_models"
 
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+elif [[ -x "/opt/homebrew/Caskroom/miniforge/base/envs/agent/bin/python" ]]; then
+  PYTHON_BIN="/opt/homebrew/Caskroom/miniforge/base/envs/agent/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+else
+  echo "[ERR] No usable Python interpreter found." >&2
+  exit 1
+fi
+
 run_dirs=(
   "$ROOT/results/agent_plans_phage_gemini"
   "$ROOT/results/agent_plans_phage_grok"
@@ -12,8 +23,8 @@ run_dirs=(
   "$ROOT/results/agent_plans_phage_qwen"
   "$ROOT/results/agent_plans_phage_deepseek_web_enriched_refactor_v2"
   "$ROOT/results/agent_plans_phage_qwen_web_enriched_refactor_v2"
-  "$ROOT/results/agent_plans_phage_deepseek_web_rag"
-  "$ROOT/results/agent_plans_phage_qwen_web_rag"
+  "$ROOT/results/agent_plans_phage_deepseek_web_lightrag_8shard"
+  "$ROOT/results/agent_plans_phage_qwen_web_lightrag_8shard"
   "$ROOT/results/llm_plans_phage_gemini"
   "$ROOT/results/llm_plans_phage_grok"
   "$ROOT/results/llm_plans_phage_gpt52chat"
@@ -23,27 +34,27 @@ run_dirs=(
 
 mkdir -p "$plots_root"
 
-python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+"$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "qwen_10pt" \
   --output-dir "$plots_root/score_radars_qwen"
 
-python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+"$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "deepseekv3_10pt" \
   --output-dir "$plots_root/score_radars_deepseekv3"
 
-python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+"$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "gemini_10pt" \
   --output-dir "$plots_root/score_radars_gemini"
 
-python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+"$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "gpt52chat_10pt" \
   --output-dir "$plots_root/score_radars_gpt52chat"
 
-python -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
+"$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_radars.py" \
   --run-dirs "${run_dirs[@]}" \
   --eval-tag "grok_10pt" \
   --output-dir "$plots_root/score_radars_grok"
@@ -78,7 +89,7 @@ plot_boxplots_all() {
       files+=("$f")
       labels+=("$l")
     done <<< "${groups[$key]}"
-    python -u "$ROOT/scripts/plot/plot_plan_score_boxplots.py" \
+    "$PYTHON_BIN" -u "$ROOT/scripts/plot/plot_plan_score_boxplots.py" \
       --files "${files[@]}" \
       --labels "${labels[@]}" \
       --output-dir "$plots_root/score_boxplots_${tag}/eval_${tag}_10pt_${ts}"

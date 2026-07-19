@@ -22,7 +22,7 @@ def build_action_catalog(
         )
     if allow_graph_rag:
         base_actions.append(
-            "- tool_operation: graph_rag (query the MultiRAG knowledge backend; requires `query`, optional `mode`).\n"
+            "- tool_operation: graph_rag (query the 8-shard LightRAG knowledge backend; requires `query`, optional `mode`).\n"
             "  mode can be `hybrid` (default, best general choice), `local` (entity-focused local context), "
             "`global` (higher-level global summary), or `naive` (plain retrieval).\n"
             "  Only send `query` and `mode`; do NOT generate `top_k`, `hops`, `return_subgraph`, or `focus_entities`."

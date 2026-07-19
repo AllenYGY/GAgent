@@ -2,10 +2,29 @@
 set -euo pipefail
 
 # Usage:
-#   export GROK_API_KEY="..."   # or XAI_API_KEY
+#   export QWEN_API_KEY="..."
 #   bash scripts/pipeline/run_eval_plan.sh
 
 ROOT="/Users/allenygy/Research/GAgent"
+
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+elif [[ -x "/opt/homebrew/Caskroom/miniforge/base/envs/agent/bin/python" ]]; then
+  PYTHON_BIN="/opt/homebrew/Caskroom/miniforge/base/envs/agent/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+else
+  echo "[ERR] No usable Python interpreter found." >&2
+  exit 1
+fi
+export PYTHON_BIN
 
 RUNS=(
   # "results/agent_plans_phage_gemini"
@@ -16,8 +35,10 @@ RUNS=(
   # "results/agent_plans_phage_deepseek_web_enriched_refactor_v2"
   # "results/agent_plans_phage_qwen_web_enriched_refactor_v2"
   # Only qwen/deepseek generator runs currently have GraphRAG-enriched plan trees.
-  "results/agent_plans_phage_deepseek_web_rag"
-  "results/agent_plans_phage_qwen_web_rag"
+  # "results/agent_plans_phage_deepseek_web_rag"
+  # "results/agent_plans_phage_qwen_web_rag"
+  "results/agent_plans_phage_qwen_web_lightrag_8shard"
+  "results/agent_plans_phage_deepseek_web_lightrag_8shard"
   # "results/llm_plans_phage_gemini"
   # "results/llm_plans_phage_grok"
   # "results/llm_plans_phage_gpt52chat"
@@ -29,15 +50,17 @@ RUNS=(
 EVAL_SPECS=(
   # "openrouter|google/gemini-3-pro-preview|gemini"
   # "openrouter|openai/gpt-5.2-chat|gpt52chat"
-  "grok|grok-4|grok"
+  # "grok|grok-4|grok"
+  "qwen|qwen3-max|qwen"
+  "qwen|deepseek-v3|deepseekv3"
 )
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
 SCORE_BASE="10pt"
 SCORE_SUFFIX="_${SCORE_BASE}_${RUN_TS}"
 
-if [[ -z "${GROK_API_KEY:-${XAI_API_KEY:-}}" ]]; then
-  echo "[ERR] GROK_API_KEY or XAI_API_KEY is required for grok evaluation." >&2
+if [[ -z "${QWEN_API_KEY:-}" ]]; then
+  echo "[ERR] QWEN_API_KEY is required for evaluation." >&2
   exit 1
 fi
 
@@ -77,8 +100,9 @@ for spec in "${EVAL_SPECS[@]}"; do
 done
 EVAL_CONCURRENCY="${EVAL_CONCURRENCY:-2}"
 echo "[INFO] Eval concurrency: $EVAL_CONCURRENCY"
+echo "[INFO] Python: $PYTHON_BIN"
 
-export GROK_API_KEY="${GROK_API_KEY:-${XAI_API_KEY:-}}"
+export QWEN_API_KEY
 
 job_dir=$(mktemp -d -t run_eval_plan)
 trap 'rm -rf "$job_dir"' EXIT
@@ -95,10 +119,11 @@ for i in "${!RUNS[@]}"; do
 done
 
 parallel --colsep '\t' --jobs "$EVAL_CONCURRENCY" --lb \
-  'run={1}; provider={2}; model={3}; tag={4}; plan_dir={5}; \
+  'set -o pipefail; \
+    run={1}; provider={2}; model={3}; tag={4}; plan_dir={5}; \
     mkdir -p "'$ROOT'/$run/eval"; \
     log_file="'$ROOT'/$run/eval/eval_${tag}'"$SCORE_SUFFIX"'.log"; \
-    python -u "'$ROOT'/scripts/eval/eval_plan_quality.py" \
+    "$PYTHON_BIN" -u "'$ROOT'/scripts/eval/eval_plan_quality.py" \
       --plan-tree-dir "$plan_dir" \
       --provider "$provider" \
       --model "$model" \
@@ -107,14 +132,18 @@ parallel --colsep '\t' --jobs "$EVAL_CONCURRENCY" --lb \
       --max-retries 3 \
       --output "'$ROOT'/$run/eval/plan_scores_${tag}'"$SCORE_SUFFIX"'.csv" \
       --jsonl-output "'$ROOT'/$run/eval/plan_scores_${tag}'"$SCORE_SUFFIX"'.jsonl" \
-      2>&1 | tee -a "$log_file";' :::: "$jobs_file"
+      2>&1 | tee -a "$log_file"; \
+    status=${PIPESTATUS[0]}; \
+    exit "$status";' :::: "$jobs_file"
 
 end_ts=$(date +%s)
 elapsed=$(( end_ts - start_ts ))
 echo "[INFO] Eval finished in ${elapsed}s. Output files:"
 for run in "${RUNS[@]}"; do
-  echo "  - $ROOT/$run/eval/plan_scores_grok${SCORE_SUFFIX}.csv"
-  echo "  - $ROOT/$run/eval/plan_scores_grok${SCORE_SUFFIX}.jsonl"
+  echo "  - $ROOT/$run/eval/plan_scores_qwen${SCORE_SUFFIX}.csv"
+  echo "  - $ROOT/$run/eval/plan_scores_qwen${SCORE_SUFFIX}.jsonl"
+  echo "  - $ROOT/$run/eval/plan_scores_deepseekv3${SCORE_SUFFIX}.csv"
+  echo "  - $ROOT/$run/eval/plan_scores_deepseekv3${SCORE_SUFFIX}.jsonl"
 done
 
 echo "[INFO] Generating plots..."
